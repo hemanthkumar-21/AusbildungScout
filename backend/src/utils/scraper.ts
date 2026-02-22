@@ -259,9 +259,6 @@ export class JobScraper {
         if (listingUrl.includes('ausbildung.de')) {
           const baseUrl = 'https://www.ausbildung.de';
           jobUrls = await this.scrapeAusbildungDe(page, baseUrl);
-        } else if (listingUrl.includes('azubiyo.de')) {
-          const baseUrl = 'https://www.azubiyo.de';
-          jobUrls = await this.scrapeAzubiyo(page, baseUrl);
         }
         
         await page.close();
@@ -295,374 +292,165 @@ export class JobScraper {
   }
   
   /**
-   * Scrape ausbildung.de for job listings
+   * Scrape ausbildung.de for job listings from page HTML
    */
   private async scrapeAusbildungDe(page: Page, baseUrl: string): Promise<string[]> {
     try {
-      console.log('Scraping ausbildung.de using pagination API...');
+      console.log('Scraping ausbildung.de from page HTML...');
       
       const jobUrls = new Set<string>();
       const searchQuery = 'Anwendungsentwicklung|';
-      let from = 0;
-      const pageSize = 20;
+      const apprenticeshipType = 'Ausbildung';
       
-      // First, load the main page to establish session and get cookies
-      await page.goto(`${baseUrl}/suche/?search=${encodeURIComponent(searchQuery)}&apprenticeshipType=Ausbildung`, {
+      const searchUrl = `${baseUrl}/suche/?search=${encodeURIComponent(searchQuery)}&apprenticeshipType=${apprenticeshipType}`;
+      
+      // Load the search page
+      await page.goto(searchUrl, {
         waitUntil: 'networkidle2',
       });
-      console.log('✓ Loaded search page to establish session', `${baseUrl}/suche/?search=${encodeURIComponent(searchQuery)}&apprenticeshipType=Ausbildung`);
-      // Get cookies from page
-      const cookies = await page.cookies();
-      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+      console.log('✓ Loaded search page');
       
-      // Get the next-action value from the page
-      const nextAction = await page.evaluate(() => {
-        const meta = document.querySelector('meta[property="next-action"]');
-        return meta?.getAttribute('content') || '7fa11ce890df80ea4c45f45a2021e6936212baf10c';
+      // Wait for content to load
+      await randomDelay(3000, 4000);
+      
+      // Try to extract total vacancy count
+      const totalVacancies = await page.evaluate(() => {
+        // Look in script tags for vacanciesCount
+        const scripts = document.querySelectorAll('script');
+        for (const script of scripts) {
+          const content = script.textContent || '';
+          const match = content.match(/"vacanciesCount":(\d+)/);
+          if (match && match[1]) {
+            return parseInt(match[1], 10);
+          }
+        }
+        
+        // Look in page text for "X Ausbildungsplätze" or similar
+        const bodyText = document.body.innerText;
+        const textMatch = bodyText.match(/(\d+)\s*(?:Ausbildungsplätze|Stellen|Treffer)/i);
+        if (textMatch && textMatch[1]) {
+          return parseInt(textMatch[1], 10);
+        }
+        
+        return 0;
       });
       
-      // Get router state
-      const routerState = await page.evaluate(() => {
-        const meta = document.querySelector('meta[property="next-router-state-tree"]');
-        return meta?.getAttribute('content') || '%5B%22%22%2C%7B%22children%22%3A%5B%22(default)%22%2C%7B%22children%22%3A%5B%22suche%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D';
-      });
+      if (totalVacancies > 0) {
+        console.log(`📊 Total vacancies available: ${totalVacancies}`);
+      }
       
-      console.log(`Got cookies and next-action: ${nextAction}`);
-      
-      // First API call to get total vacancies count
-      let totalVacancies = 469; // Default fallback
-      try {
-        const firstResponse = await fetch(`${baseUrl}/suche/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain;charset=UTF-8',
-            'Accept': 'text/x-component',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Cache-Control': 'no-cache',
-            'next-action': nextAction,
-            'next-router-state-tree': routerState,
-            'Origin': baseUrl,
-            'Referer': `${baseUrl}/suche/?search=${encodeURIComponent(searchQuery)}&apprenticeshipType=Ausbildung`,
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Cookie': cookieString,
-          },
-          body: JSON.stringify([{ search: searchQuery, from: 0 }]),
+      // Extract job URLs from the page HTML
+      const extractedUrls = await page.evaluate((base: string) => {
+        const urls: string[] = [];
+        
+        // Strategy 1: Look for links to /stellen/ in the HTML
+        const jobLinks = document.querySelectorAll('a[href*="/stellen/"]');
+        jobLinks.forEach((link: any) => {
+          const href = link.getAttribute('href');
+          if (href && href.includes('/stellen/') && !href.includes('?')) {
+            let url = href;
+            if (!url.startsWith('http')) {
+              url = base + (href.startsWith('/') ? href : '/' + href);
+            }
+            if (!urls.includes(url)) {
+              urls.push(url);
+            }
+          }
         });
         
-        if (firstResponse.ok) {
-          const firstText = await firstResponse.text();
-          // Try to extract vacanciesCount from metadata
-          const vacanciesMatch = firstText.match(/"vacanciesCount":(\d+)/);
-          if (vacanciesMatch && vacanciesMatch[1]) {
-            // Cap to 500 since we slice to 500 anyway
-            totalVacancies = Math.min(parseInt(vacanciesMatch[1], 10), 500);
-            console.log(`📊 Total vacancies available: ${totalVacancies}`);
+        // Strategy 2: Look for data in script tags (Next.js data)
+        const scripts = document.querySelectorAll('script');
+        scripts.forEach((script) => {
+          const content = script.textContent || '';
+          if (content.includes('"slug"')) {
+            // Extract slugs from JSON data
+            const slugMatches = content.matchAll(/"slug":"([^"]+)"/g);
+            for (const match of slugMatches) {
+              if (match[1]) {
+                const url = `${base}/stellen/${match[1]}/`;
+                if (!urls.includes(url)) {
+                  urls.push(url);
+                }
+              }
+            }
           }
-        }
-      } catch (error) {
-        console.warn('Could not fetch vacancies count, using default:', error);
-      }
+        });
+        
+        return urls;
+      }, baseUrl);
       
-      // Paginate through results using direct API calls - dynamically based on actual count
-      while (jobUrls.size < totalVacancies) {
-        try {
-          console.log(`Fetching results from position ${from}... (${jobUrls.size}/${totalVacancies})`);
-          
-          const response = await fetch(`${baseUrl}/suche/`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'text/plain;charset=UTF-8',
-              'Accept': 'text/x-component',
-              'Accept-Language': 'en-US,en;q=0.9',
-              'Cache-Control': 'no-cache',
-              'next-action': nextAction,
-              'next-router-state-tree': routerState,
-              'Origin': baseUrl,
-              'Referer': `${baseUrl}/suche/?search=${encodeURIComponent(searchQuery)}&apprenticeshipType=Ausbildung`,
-              'Sec-Fetch-Dest': 'empty',
-              'Sec-Fetch-Mode': 'cors',
-              'Sec-Fetch-Site': 'same-origin',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Cookie': cookieString,
-            },
-            body: JSON.stringify([{ search: searchQuery, from }]),
+      extractedUrls.forEach(url => jobUrls.add(url));
+      console.log(`✓ Found ${jobUrls.size} jobs from initial page`);
+      
+      // Determine target count
+      const targetCount = totalVacancies > 0 ? Math.min(totalVacancies, 500) : 500;
+      
+      // Calculate dynamic max scrolls based on target (estimate ~20 jobs per scroll)
+      const estimatedScrollsNeeded = Math.ceil((targetCount - jobUrls.size) / 20);
+      const maxScrolls = Math.min(Math.max(estimatedScrollsNeeded + 10, 30), 100); // Between 30-100 scrolls
+      
+      // Try scrolling to load more
+      if (jobUrls.size < targetCount) {
+        console.log(`📜 Scrolling to load more jobs (target: ${targetCount}, max scrolls: ${maxScrolls})...`);
+        
+        let previousCount = jobUrls.size;
+        let noNewResultsCount = 0;
+        
+        for (let i = 0; i < maxScrolls && jobUrls.size < targetCount; i++) {
+          // Scroll to bottom
+          await page.evaluate(() => {
+            window.scrollTo(0, document.body.scrollHeight);
           });
           
-          if (!response.ok) {
-            console.error(`API error: ${response.status}`);
-            break;
-          }
+          // Increased wait time for lazy loading
+          await randomDelay(3000, 5000);
           
-          const responseText = await response.text();
-          console.log(`Got response of ${responseText.length} bytes`);
-          
-          // Parse the RSC response
-          const hits = this.parseAusbildungDeResponse(responseText);
-          
-          if (!hits || hits.length === 0) {
-            console.log('No more results in response');
-            break;
-          }
-          
-          hits.forEach((job: any) => {
-            if (job.vacancyData?.slug) {
-              const url = `${baseUrl}/stellen/${job.vacancyData.slug}/`;
-              jobUrls.add(url);
-            }
-          });
-          
-          console.log(`Got ${hits.length} results, total: ${jobUrls.size}/${totalVacancies}`);
-          from += pageSize;
-          
-          // Continue pagination - don't break on fewer results yet
-          // The API may return fewer results on last page
-          if (hits.length === 0) {
-            console.log('Reached end of results (empty page)');
-            break;
-          }
-          
-          // Rate limiting
-          await randomDelay(800, 1500);
-        } catch (error) {
-          console.error('Error in pagination loop:', error);
-          break;
-        }
-      }
-      
-      const urlArray = Array.from(jobUrls).slice(0, 500);
-      console.log(`Extracted ${urlArray.length} job URLs from ausbildung.de (total available: ${totalVacancies})`);
-      return urlArray;
-    } catch (error) {
-      console.error('Error scraping ausbildung.de:', error);
-      return [];
-    }
-  }
-  
-  private parseAusbildungDeResponse(responseText: string): any[] {
-    try {
-      // The RSC response contains streaming format with chunks
-      // Each chunk starts with a number followed by a colon
-      // We're looking for chunk 1 which contains: 1:{"data":{"hits":{"primary":[...]}}}
-      
-      // Find all lines that start with "1:"
-      const lines = responseText.split('\n');
-      
-      for (const line of lines) {
-        // Look for lines that contain the data chunk
-        if (line.includes('"hits"') && line.includes('"primary"')) {
-          try {
-            // Extract JSON part - skip the "1:" prefix if present
-            let jsonStr = line;
-            if (line.startsWith('1:')) {
-              jsonStr = line.substring(2);
-            }
+          // Extract new URLs
+          const newUrls = await page.evaluate((base: string) => {
+            const urls: string[] = [];
             
-            // Try to parse as JSON
-            const data = JSON.parse(jsonStr);
-            
-            // Navigate to find the hits array
-            if (data.data?.hits?.primary) {
-              console.log(`✓ Found ${data.data.hits.primary.length} results via data.hits.primary`);
-              return data.data.hits.primary;
-            }
-          } catch (e) {
-            // Continue to next strategy
-          }
-        }
-      }
-      
-      // Strategy 2: Direct array search - look for the array itself
-      const arrayMatch = responseText.match(/\[\s*\{\s*"jobPostingClusterData"[\s\S]*?\}(?=,"extended":|])/);
-      if (arrayMatch) {
-        try {
-          const jsonStr = '[' + arrayMatch[0] + ']';
-          const jobs = JSON.parse(jsonStr);
-          console.log(`✓ Found ${jobs.length} results via direct array parsing`);
-          return jobs;
-        } catch (e) {
-          // Continue
-        }
-      }
-      
-      console.log(`⚠️  No valid hits found in response (length: ${responseText.length})`);
-      return [];
-    } catch (e) {
-      console.error('Error parsing response:', e);
-      return [];
-    }
-  }
-  
-  
-  /**
-   * Scrape azubiyo.de for job listings with pagination support
-   * Structure: https://www.azubiyo.de/stellenmarkt/?subject=it&jobtype=1
-   * Pagination: /stellenmarkt/2/?subject=it&jobtype=1, /stellenmarkt/3/?subject=it&jobtype=1
-   */
-  private async scrapeAzubiyo(page: Page, baseUrl: string): Promise<string[]> {
-    try {
-      const jobUrls = new Set<string>();
-      const currentUrl = page.url();
-      
-      // Extract base URL parameters
-      const urlObj = new URL(currentUrl);
-      const params = new URLSearchParams(urlObj.search);
-      const subject = params.get('subject') || 'Anwendungsentwicklung';
-      const jobtype = params.get('jobtype') || '1';
-      
-      console.log(`🔍 Scraping azubiyo.de for subject=${subject}, jobtype=${jobtype}`);
-      
-      // Pagination loop - scrape multiple pages
-      let pageNum = 1;
-      let maxPages = 10; // Limit to prevent infinite loops
-      
-      while (pageNum <= maxPages) {
-        try {
-          // Human-like delay between pages
-          await humanDelay();
-          
-          // Construct pagination URL
-          let paginatedUrl: string;
-          if (pageNum === 1) {
-            paginatedUrl = `${baseUrl}/stellenmarkt/?subject=${subject}&jobtype=${jobtype}`;
-          } else {
-            paginatedUrl = `${baseUrl}/stellenmarkt/${pageNum}/?subject=${subject}&jobtype=${jobtype}`;
-          }
-          
-          console.log(`📄 Fetching page ${pageNum}: ${paginatedUrl}`);
-          
-          // Navigate to page
-          await page.goto(paginatedUrl, {
-            waitUntil: 'networkidle2',
-            timeout: 50000,
-          });
-          
-          // Human-like interaction on page
-          await humanLikeInteraction(page);
-          
-          // Save page HTML for debugging
-          const html = await page.content();
-          const dir = 'page_debug';
-          if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-          }
-          fs.writeFileSync(
-            path.join(dir, `azubiyo_de_page_${pageNum}.html`),
-            html,
-            'utf-8'
-          );
-          console.log(`✓ Page ${pageNum} saved to: page_debug/azubiyo_de_page_${pageNum}.html`);
-          
-          // Wait for any lazy loading
-          await page.evaluate(() => new Promise(r => setTimeout(r, 1000)));
-          
-          // Extract job URLs from page
-          const pageJobUrls = await page.evaluate((base: string) => {
-            const links: string[] = [];
-            const seenUrls = new Set<string>();
-            
-            // Target the job offer cards in the list structure:
-            // <li class="col-md-6 col-lg-12 mb-4">
-            //   <div id="jB19A38G6" data-ng-click="...">
-            //     <a href="/stellenanzeigen/ausbildung-zum-fachlageristen-w-m-d_gc-gruppe_b19a38g6/" ...>
-            
-            // Primary selector: job listing items with links
-            const jobItems = document.querySelectorAll('li[class*="col-md-6"] a[href*="/stellenanzeigen/"]');
-            
-            jobItems.forEach((el: any) => {
-              const href = el.getAttribute('href');
-              
-              if (href && href.includes('/stellenanzeigen/')) {
+            // Look for all job links
+            const jobLinks = document.querySelectorAll('a[href*="/stellen/"]');
+            jobLinks.forEach((link: any) => {
+              const href = link.getAttribute('href');
+              if (href && href.includes('/stellen/') && !href.includes('?')) {
                 let url = href;
-                
-                // Handle relative URLs
                 if (!url.startsWith('http')) {
-                  url = new URL(href, document.location.href).href;
+                  url = base + (href.startsWith('/') ? href : '/' + href);
                 }
-                
-                // Avoid duplicates
-                if (!seenUrls.has(url)) {
-                  seenUrls.add(url);
-                  links.push(url);
-                }
+                urls.push(url);
               }
             });
             
-            // Fallback: Try alternative selectors
-            if (links.length === 0) {
-              const altSelectors = [
-                'a[href*="/stellenanzeigen/"]',
-                '[class*="job-search-job-offer"] a[href*="/stellenanzeigen/"]',
-                '[class*="job-offer-teaser"] a[href*="/stellenanzeigen/"]',
-              ];
-              
-              for (const selector of altSelectors) {
-                try {
-                  const elements = document.querySelectorAll(selector);
-                  elements.forEach((el: any) => {
-                    const href = el.getAttribute('href');
-                    
-                    if (href && href.includes('/stellenanzeigen/')) {
-                      let url = href;
-                      
-                      if (!url.startsWith('http')) {
-                        url = new URL(href, document.location.href).href;
-                      }
-                      
-                      if (!seenUrls.has(url)) {
-                        seenUrls.add(url);
-                        links.push(url);
-                      }
-                    }
-                  });
-                  
-                  if (links.length > 0) break;
-                } catch (e) {
-                  // Continue to next selector
-                }
-              }
-            }
-            
-            return Array.from(seenUrls);
+            return urls;
           }, baseUrl);
           
-          console.log(`✓ Found ${pageJobUrls.length} job listings on page ${pageNum}`);
+          newUrls.forEach(url => jobUrls.add(url));
           
-          // Add URLs to set
-          pageJobUrls.forEach(url => jobUrls.add(url));
-          
-          // Stop if no jobs found (likely reached end of results)
-          if (pageJobUrls.length === 0) {
-            console.log('⚠️  No jobs found on this page. Likely reached end of results.');
-            break;
+          if (jobUrls.size > previousCount) {
+            console.log(`  ✓ Scroll ${i + 1}: ${jobUrls.size}/${targetCount} jobs`);
+            noNewResultsCount = 0;
+            previousCount = jobUrls.size;
+          } else {
+            noNewResultsCount++;
+            // Wait for 5 scrolls without new results
+            if (noNewResultsCount >= 5) {
+              console.log(`  ⚠️ No new results after 5 scrolls, stopping at ${jobUrls.size}/${targetCount}`);
+              break;
+            }
           }
-          
-          // Stop if we have enough jobs
-          if (jobUrls.size >= 500) {
-            console.log('📈 Reached target of 500 jobs');
-            break;
-          }
-          
-          // Rate limiting between pages
-          await randomDelay(2000, 4000);
-          pageNum++;
-        } catch (error) {
-          console.warn(`⚠️  Error processing page ${pageNum}:`, error);
-          break;
         }
       }
       
       const urlArray = Array.from(jobUrls);
-      console.log(`✓ Extracted ${urlArray.length} total job URLs from azubiyo.de`);
+      console.log(`✓ Extracted ${urlArray.length} job URLs from ausbildung.de`);
       return urlArray;
     } catch (error) {
-      console.error('❌ Error scraping azubiyo.de:', error);
+      console.error('❌ Error scraping ausbildung.de:', error);
       return [];
     }
   }
-  
+
   /**
    * Check for duplicates before processing
    */

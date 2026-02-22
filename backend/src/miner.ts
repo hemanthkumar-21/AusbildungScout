@@ -11,6 +11,7 @@ import connectDB from '@/db';
 import Job from '@/model/job';
 import JobScraper from '@/utils/scraper';
 import { createJobAnalysisPrompt, processAIResponse } from '@/utils/gemini-pipeline';
+import { resolveFirstYearSalary } from '@/utils/salary-resolver';
 import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
@@ -19,18 +20,33 @@ interface MinerConfig {
   urls: string[];
   maxJobsPerRun: number;
   dryRun: boolean;
+  enrichSalary?: boolean; // Whether to check company websites for missing salaries
 }
 
 class JobMiner {
   private scraper: JobScraper;
   private config: MinerConfig;
   private rawDataDir: string;
-  private lastGeminiCallTime: number = 0;
-  private geminiCallCount: number = 0;
-  private geminiCallResetTime: number = Date.now();
+  private geminiApiKeys: string[] = [];
+  private currentKeyIndex: number = 0;
+  private keyStats: Map<number, { lastCallTime: number; callCount: number; resetTime: number }> = new Map();
   
   constructor(config: MinerConfig) {
     this.config = config;
+    
+    // Load multiple API keys from environment (comma-separated)
+    const apiKeysEnv = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
+    this.geminiApiKeys = apiKeysEnv.split(',').map(key => key.trim()).filter(key => key.length > 0);
+    
+    if (this.geminiApiKeys.length === 0) {
+      console.warn('⚠️  No Gemini API keys found. Set GEMINI_API_KEYS or GEMINI_API_KEY in .env');
+    } else {
+      console.log(`🔑 Loaded ${this.geminiApiKeys.length} Gemini API key(s) for rotation`);
+      // Initialize stats for each key
+      for (let i = 0; i < this.geminiApiKeys.length; i++) {
+        this.keyStats.set(i, { lastCallTime: 0, callCount: 0, resetTime: Date.now() });
+      }
+    }
     this.scraper = new JobScraper({
       minDelayMs: parseInt(process.env.SCRAPER_MIN_DELAY_MS || '2000'),
       maxDelayMs: parseInt(process.env.SCRAPER_MAX_DELAY_MS || '5000'),
@@ -72,6 +88,177 @@ ${html}
     }
   }
   
+  /**
+   * Get current API key and rotate to next if needed
+   */
+  private getCurrentApiKey(): string | null {
+    if (this.geminiApiKeys.length === 0) return null;
+    return this.geminiApiKeys[this.currentKeyIndex] || null;
+  }
+  
+  /**
+   * Rotate to next API key
+   */
+  private rotateToNextKey(): void {
+    const oldIndex = this.currentKeyIndex;
+    this.currentKeyIndex = (this.currentKeyIndex + 1) % this.geminiApiKeys.length;
+    console.log(`🔄 Rotating API key: ${oldIndex + 1} → ${this.currentKeyIndex + 1}`);
+  }
+  
+  /**
+   * Check if current key can make a request (not rate limited)
+   */
+  private canUseCurrentKey(): boolean {
+    const stats = this.keyStats.get(this.currentKeyIndex);
+    if (!stats) return true;
+    
+    // Reset counter every minute
+    const timeSinceReset = Date.now() - stats.resetTime;
+    if (timeSinceReset > 60000) {
+      stats.callCount = 0;
+      stats.resetTime = Date.now();
+      return true;
+    }
+    
+    // Check if approaching rate limit (14 out of 15 calls per minute)
+    return stats.callCount < 14;
+  }
+  
+  /**
+   * Find next available API key that's not rate limited
+   */
+  private findAvailableKey(): boolean {
+    const startIndex = this.currentKeyIndex;
+    
+    // Try all keys in rotation
+    for (let i = 0; i < this.geminiApiKeys.length; i++) {
+      if (this.canUseCurrentKey()) {
+        return true;
+      }
+      this.rotateToNextKey();
+      
+      // If we've cycled back to start, all keys are rate limited
+      if (this.currentKeyIndex === startIndex && i > 0) {
+        return false;
+      }
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Record API call for current key
+   */
+  private recordApiCall(): void {
+    const stats = this.keyStats.get(this.currentKeyIndex);
+    if (stats) {
+      stats.lastCallTime = Date.now();
+      stats.callCount++;
+    }
+  }
+  
+  /**
+   * Wait for minimum delay between API calls
+   */
+  private async waitForRateLimit(): Promise<void> {
+    const stats = this.keyStats.get(this.currentKeyIndex);
+    if (!stats) return;
+    
+    const minDelayMs = 4000; // 4 seconds between calls
+    const timeSinceLastCall = Date.now() - stats.lastCallTime;
+    
+    if (timeSinceLastCall < minDelayMs) {
+      const delayNeeded = minDelayMs - timeSinceLastCall;
+      console.log(`⏳ Rate limiting (Key ${this.currentKeyIndex + 1}): waiting ${delayNeeded}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayNeeded));
+    }
+  }
+
+  /**
+   * Delete raw HTML file and associated debug files
+   */
+  private deleteRawFiles(rawFilePath: string): void {
+    try {
+      // Delete raw HTML file
+      if (rawFilePath && fs.existsSync(rawFilePath)) {
+        fs.unlinkSync(rawFilePath);
+        console.log(`🗑️  Deleted raw file: ${path.basename(rawFilePath)}`);
+      }
+      
+      // Delete corresponding page_debug files if they exist
+      const debugDir = path.join(process.cwd(), 'page_debug');
+      if (fs.existsSync(debugDir)) {
+        const filename = path.basename(rawFilePath);
+        const debugFiles = fs.readdirSync(debugDir).filter(file => file.includes(filename.replace('.html', '')));
+        for (const debugFile of debugFiles) {
+          const debugPath = path.join(debugDir, debugFile);
+          fs.unlinkSync(debugPath);
+          console.log(`🗑️  Deleted debug file: ${debugFile}`);
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️  Failed to delete raw files: ${error}`);
+    }
+  }
+
+  /**
+   * Check if a job needs salary enrichment
+   */
+  private async shouldEnrichSalary(jobData: any): Promise<boolean> {
+    // Check if job doesn't have firstYearSalary but has a tariff
+    const hasNoSalary = !jobData.salary?.firstYearSalary;
+    const hasTariff = jobData.tariff_type && jobData.tariff_type !== 'None';
+    
+    return hasNoSalary && hasTariff;
+  }
+  
+  /**
+   * Enrich job salary by checking company website
+   */
+  private async enrichJobSalary(jobData: any): Promise<void> {
+    try {
+      console.log(`💰 Enriching salary for ${jobData.company_name}...`);
+      
+      const salaryResolution = await resolveFirstYearSalary(
+        jobData.salary?.firstYearSalary,
+        jobData.salary?.thirdYearSalary,
+        jobData.tariff_type,
+        jobData.company_name,
+        jobData.original_link
+      );
+      
+      if (salaryResolution.firstYearSalary) {
+        // Update the job data with enriched salary
+        if (!jobData.salary) {
+          jobData.salary = { currency: 'EUR' };
+        }
+        
+        jobData.salary.firstYearSalary = salaryResolution.firstYearSalary;
+        
+        if (salaryResolution.thirdYearSalary) {
+          jobData.salary.thirdYearSalary = salaryResolution.thirdYearSalary;
+        }
+        
+        if (salaryResolution.average) {
+          jobData.salary.average = salaryResolution.average;
+        }
+        
+        jobData.benefits_last_updated = new Date();
+        
+        console.log(`✓ Enriched salary: €${salaryResolution.firstYearSalary}/month (source: ${salaryResolution.source})`);
+      } else {
+        console.log(`\u2139\ufe0f No salary found from ${salaryResolution.source}`);
+      }
+      
+      // Add delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+    } catch (error) {
+      console.warn(`\u26a0\ufe0f Salary enrichment failed: ${error}`)
+      // Continue anyway - job will still be saved with tariff standard salary
+    }
+  }
+
   /**
    * Main mining process
    */
@@ -119,8 +306,8 @@ ${html}
             continue;
           }
           
-          // Save raw HTML before any processing
-          this.saveRawHTML(html, jobUrl, jobIndex);
+          // Save raw HTML before any processing (will be deleted after successful save)
+          const rawFilePath = this.saveRawHTML(html, jobUrl, jobIndex);
           
           // Clean HTML
           const cleanedHtml = this.scraper.cleanHTML(html);
@@ -129,7 +316,14 @@ ${html}
           const aiJobData = await this.analyzeWithGemini(cleanedHtml, jobUrl);
           if (!aiJobData) {
             console.log(`⚠️  AI analysis failed for: ${jobUrl}`);
+            // Delete raw file since processing failed
+            this.deleteRawFiles(rawFilePath);
             continue;
+          }
+          
+          // Enrich salary if enabled and needed
+          if (this.config.enrichSalary && await this.shouldEnrichSalary(aiJobData)) {
+            await this.enrichJobSalary(aiJobData);
           }
           
           // Normalize and save
@@ -138,11 +332,16 @@ ${html}
               const job = new Job(aiJobData);
               await job.save();
               console.log(`✓ Saved: ${aiJobData.job_title} at ${aiJobData.company_name}`);
+              // Delete raw files after successful save
+              this.deleteRawFiles(rawFilePath);
             } catch (error) {
               console.error(`✗ Failed to save job: ${error}`);
+              // Keep raw file for debugging if save failed
             }
           } else {
             console.log(`[DRY RUN] Would save: ${aiJobData.job_title}`);
+            // In dry run, delete immediately since we're just testing
+            this.deleteRawFiles(rawFilePath);
           }
           
           totalProcessed++;
@@ -160,55 +359,116 @@ ${html}
   }
 
   /**
-   * Verify old jobs (30+ days old) and remove if no longer available
-   * or update if content has changed
+   * Check if a job page indicates that vacancies are still available
+   */
+  private hasVacancies(html: string): boolean {
+    const lowerHtml = html.toLowerCase();
+    
+    // Indicators that job is closed/no vacancies
+    const closedIndicators = [
+      'keine freien plätze',
+      'keine plätze verfügbar',
+      'ausbildungsplatz besetzt',
+      'stelle besetzt',
+      'bewerbungsfrist abgelaufen',
+      'nicht mehr verfügbar',
+      'no longer available',
+      'position filled',
+      'bewerbungen nicht mehr möglich',
+      'bewerbung geschlossen',
+      'ausbildung abgeschlossen',
+      'bereits vergeben',
+      'nicht mehr zugänglich',
+      '404',
+      'page not found',
+      'seite nicht gefunden'
+    ];
+    
+    // Check if any closed indicators are present
+    for (const indicator of closedIndicators) {
+      if (lowerHtml.includes(indicator)) {
+        return false;
+      }
+    }
+    
+    // Check for available positions count
+    const positionsMatch = html.match(/verfügbare\s+plätze[:\s]+(\d+)/i) || 
+                          html.match(/freie\s+plätze[:\s]+(\d+)/i) ||
+                          html.match(/available\s+positions[:\s]+(\d+)/i);
+    
+    if (positionsMatch && positionsMatch[1]) {
+      const count = parseInt(positionsMatch[1], 10);
+      return count > 0;
+    }
+    
+    // If no clear indicators, assume still available
+    return true;
+  }
+
+  /**
+   * Verify existing jobs and remove if no longer available or no vacancies
+   * Checks all jobs periodically to keep database clean
    */
   private async verifyOldJobs(): Promise<void> {
     try {
-      console.log('\n📋 Verifying jobs older than 30 days...');
+      console.log('\n📋 Verifying existing jobs in database...');
       
-      // Calculate 30 days ago
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      // Calculate 7 days ago for regular checks
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       
-      // Find jobs that haven't been checked or were checked >30 days ago
+      // Find jobs that haven't been checked or were checked >7 days ago
       const jobsToCheck = await Job.find({
         $or: [
           { last_checked_at: null },
-          { last_checked_at: { $lt: thirtyDaysAgo } }
+          { last_checked_at: { $lt: sevenDaysAgo } }
         ]
-      }).limit(50); // Process max 50 jobs per verification run
+      }).limit(100); // Process max 100 jobs per verification run
       
       console.log(`📊 Found ${jobsToCheck.length} jobs to verify`);
       
       let updated = 0;
       let removed = 0;
+      let unchanged = 0;
       
       for (const job of jobsToCheck) {
         try {
           // Skip if job doesn't have original_link
           if (!job.original_link) {
-            console.log(`⚠️  Job missing original_link: ${job._id}`);
-            continue;
-          }
-          
-          // Try to scrape the job URL
-          const html = await this.scraper.scrapeJobPage(job.original_link);
-          
-          if (!html) {
-            // Job no longer available - mark as inactive
-            console.log(`🗑️  Removing stale job: ${job.job_title}`);
+            console.log(`⚠️  Job missing original_link: ${job._id} - removing from DB`);
             if (!this.config.dryRun) {
-              await Job.findByIdAndUpdate(job._id, { 
-                is_active: false, 
-                last_checked_at: new Date() 
-              });
+              await Job.findByIdAndDelete(job._id);
             }
             removed++;
             continue;
           }
           
-          // Job still available - check for changes
+          console.log(`🔍 Checking: ${job.job_title} at ${job.company_name}`);
+          
+          // Try to scrape the job URL
+          const html = await this.scraper.scrapeJobPage(job.original_link);
+          
+          if (!html) {
+            // URL not working - delete job from database
+            console.log(`🗑️  Job URL not accessible - deleting: ${job.job_title}`);
+            if (!this.config.dryRun) {
+              await Job.findByIdAndDelete(job._id);
+            }
+            removed++;
+            continue;
+          }
+          
+          // Check if job still has vacancies
+          if (!this.hasVacancies(html)) {
+            console.log(`❌ No vacancies available - deleting: ${job.job_title}`);
+            if (!this.config.dryRun) {
+              await Job.findByIdAndDelete(job._id);
+            }
+            removed++;
+            continue;
+          }
+          
+          // Job still available with vacancies - check for changes
           const cleanedHtml = this.scraper.cleanHTML(html);
           const aiJobData = await this.analyzeWithGemini(cleanedHtml, job.original_link);
           
@@ -219,7 +479,7 @@ ${html}
             if (hasChanges) {
               console.log(`✏️  Updating changed job: ${job.job_title}`);
               if (!this.config.dryRun) {
-                // Update only the fields that changed
+                // Update with new data
                 await Job.findByIdAndUpdate(job._id, {
                   ...aiJobData,
                   last_checked_at: new Date(),
@@ -230,24 +490,31 @@ ${html}
             } else {
               console.log(`✓ Job unchanged: ${job.job_title}`);
               if (!this.config.dryRun) {
-                // Update last_checked_at without changing other fields
+                // Update last_checked_at only
                 await Job.findByIdAndUpdate(job._id, {
                   last_checked_at: new Date(),
                   is_active: true
                 });
               }
+              unchanged++;
             }
           } else {
-            // Failed to analyze - update check time but keep the job
+            // Failed to analyze but page is accessible - keep the job
+            console.log(`⚠️  Analysis failed but job still exists: ${job.job_title}`);
             if (!this.config.dryRun) {
               await Job.findByIdAndUpdate(job._id, {
                 last_checked_at: new Date()
               });
             }
+            unchanged++;
           }
+          
+          // Add delay between verification checks to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
         } catch (error) {
           console.error(`⚠️  Error verifying job ${job._id}: ${error}`);
-          // Update last_checked_at even on error
+          // Update last_checked_at even on error to avoid re-checking too soon
           if (!this.config.dryRun) {
             await Job.findByIdAndUpdate(job._id, {
               last_checked_at: new Date()
@@ -256,7 +523,7 @@ ${html}
         }
       }
       
-      console.log(`✓ Verification complete: ${updated} updated, ${removed} removed`);
+      console.log(`✓ Verification complete: ${updated} updated, ${unchanged} unchanged, ${removed} deleted`);
     } catch (error) {
       console.error('⚠️  Job verification failed:', error);
       // Don't stop mining if verification fails
@@ -488,46 +755,41 @@ ${html}
    */
   private async analyzeWithGemini(html: string, jobUrl: string, retryCount: number = 0): Promise<any> {
     try {
-      const geminiApiKey = process.env.GEMINI_API_KEY;
-      if (!geminiApiKey) {
-        console.log('📌 Using HTML parser fallback (no API key)...');
+      // Check if we have API keys
+      if (this.geminiApiKeys.length === 0) {
+        console.log('📌 Using HTML parser fallback (no API keys)...');
         return this.parseJobFromHTML(html, jobUrl);
       }
       
-      // Free tier rate limits: 15 requests per minute, 1.5M tokens per day
-      // Add delay between requests to stay under limit
-      const timeSinceLastCall = Date.now() - this.lastGeminiCallTime;
-      const minDelayMs = 4000; // 4 second minimum delay = ~15 requests/min
-      
-      if (timeSinceLastCall < minDelayMs) {
-        const delayNeeded = minDelayMs - timeSinceLastCall;
-        console.log(`⏳ Rate limiting: waiting ${delayNeeded}ms before next Gemini call...`);
-        await new Promise(resolve => setTimeout(resolve, delayNeeded));
+      // Find available API key (rotate if current is rate limited)
+      if (!this.findAvailableKey()) {
+        // All keys are rate limited, wait for the current key's window to reset
+        const stats = this.keyStats.get(this.currentKeyIndex);
+        if (stats) {
+          const waitTime = 60000 - (Date.now() - stats.resetTime) + 1000;
+          console.log(`⚠️  All API keys rate limited. Waiting ${Math.ceil(waitTime / 1000)}s...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          stats.callCount = 0;
+          stats.resetTime = Date.now();
+        }
       }
       
-      // Reset call counter every minute
-      const timeSinceReset = Date.now() - this.geminiCallResetTime;
-      if (timeSinceReset > 60000) {
-        this.geminiCallCount = 0;
-        this.geminiCallResetTime = Date.now();
+      // Wait for rate limit before making call
+      await this.waitForRateLimit();
+      
+      const geminiApiKey = this.getCurrentApiKey();
+      if (!geminiApiKey) {
+        console.log('📌 Using HTML parser fallback (no valid API key)...');
+        return this.parseJobFromHTML(html, jobUrl);
       }
       
-      // Check if we're approaching the rate limit
-      if (this.geminiCallCount >= 14) {
-        const waitTime = 60000 - timeSinceReset + 1000;
-        console.log(`⚠️  Approaching rate limit (${this.geminiCallCount}/15). Waiting ${Math.ceil(waitTime / 1000)}s...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-        this.geminiCallCount = 0;
-        this.geminiCallResetTime = Date.now();
-      }
-      
-      console.log('🤖 Analyzing with Gemini API...');
+      console.log(`🤖 Analyzing with Gemini API (Key ${this.currentKeyIndex + 1}/${this.geminiApiKeys.length})...`);
       
       const ai = new GoogleGenAI({ apiKey: geminiApiKey });
       const prompt = createJobAnalysisPrompt(html);
       
-      this.lastGeminiCallTime = Date.now();
-      this.geminiCallCount++;
+      // Record the API call
+      this.recordApiCall();
       
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -561,15 +823,31 @@ ${html}
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       
-      // Handle 429 Too Many Requests with exponential backoff
+      // Handle 429 Too Many Requests by rotating to next key
       if (errorMessage.includes('429') || errorMessage.includes('quota') || errorMessage.includes('Too Many Requests')) {
-        if (retryCount < 3) {
-          const backoffMs = Math.pow(2, retryCount) * 60000; // 1min, 2min, 4min
-          console.warn(`⚠️  Rate limited. Retrying in ${Math.ceil(backoffMs / 1000)}s (attempt ${retryCount + 1}/3)...`);
+        console.warn(`⚠️  API Key ${this.currentKeyIndex + 1} rate limited`);
+        
+        // Mark current key as rate limited and rotate
+        const stats = this.keyStats.get(this.currentKeyIndex);
+        if (stats) {
+          stats.callCount = 15; // Mark as maxed out
+        }
+        
+        // Try next key if available
+        if (this.geminiApiKeys.length > 1 && retryCount < this.geminiApiKeys.length) {
+          this.rotateToNextKey();
+          console.log(`🔄 Retrying with next API key (attempt ${retryCount + 1}/${this.geminiApiKeys.length})...`);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause
+          return this.analyzeWithGemini(html, jobUrl, retryCount + 1);
+        } else if (retryCount < this.geminiApiKeys.length + 2) {
+          // All keys tried, wait and retry with first key
+          const backoffMs = 30000; // 30 seconds
+          console.warn(`⚠️  All keys exhausted. Waiting ${backoffMs / 1000}s before retry...`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
+          this.currentKeyIndex = 0; // Reset to first key
           return this.analyzeWithGemini(html, jobUrl, retryCount + 1);
         } else {
-          console.error('❌ Max retries exceeded for Gemini API. Using fallback...');
+          console.error('❌ Max retries exceeded for all Gemini API keys. Using fallback...');
           return this.parseJobFromHTML(html, jobUrl);
         }
       }
@@ -583,16 +861,31 @@ ${html}
 
 /**
  * Run the miner
- * Usage: tsx src/miner.ts
+ * Usage: 
+ *   tsx src/miner.ts                    # Full mining with tariff salaries + company website enrichment
+ *   tsx src/miner.ts --no-enrich-salary # Skip company website salary enrichment (faster)
+ *   tsx src/miner.ts --dry-run          # Test without saving to DB
  */
 async function main() {
+  // Parse command line arguments
+  const args = process.argv.slice(2);
+  const skipEnrichment = args.includes('--no-enrich-salary');
+  const enrichSalary = !skipEnrichment; // Enabled by default
+  const dryRun = args.includes('--dry-run') || process.env.DEMO_MODE === 'true';
+  
+  if (enrichSalary) {
+    console.log('💰 Salary enrichment enabled - will check company websites for salary data');
+  } else {
+    console.log('⚡ Fast mode - using tariff standards only (no company website checks)');
+  }
+  
   const config: MinerConfig = {
     urls: [
       'https://www.ausbildung.de/suche/?search=Anwendungsentwicklung%7C&apprenticeshipType=Ausbildung',
-      'https://www.azubiyo.de/stellenmarkt/?subject=Anwendungsentwicklung',
     ],
     maxJobsPerRun: 100,
-    dryRun: process.env.DEMO_MODE === 'true', // Dry run in demo mode
+    dryRun,
+    enrichSalary,
   };
   
   const miner = new JobMiner(config);

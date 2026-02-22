@@ -3,7 +3,7 @@
  * Implements the three-phase filtering pipeline
  */
 
-import { GermanLevelRank, GermanLevel } from '@/types';
+import { GermanLevelRank, GermanLevel, TariffType } from '@/types';
 
 export interface JobFilterQuery {
   // Hard Constraints
@@ -14,6 +14,13 @@ export interface JobFilterQuery {
   minSalary?: number;
   startDate?: string;
   educationLevel?: string;
+  
+  // New Filters
+  tariffTypes?: TariffType[];      // Filter by multiple tariff types
+  relocationSupport?: boolean;      // Filter for relocation support offered
+  rentSubsidy?: boolean;            // Filter for rent subsidy
+  freeAccommodation?: boolean;      // Filter for free accommodation
+  benefitTags?: string[];           // Filter by specific benefit tags
   
   // Fuzzy Search
   searchTerm?: string;
@@ -49,9 +56,12 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
   
   // === PHASE 2: RANGE CONSTRAINTS ===
   
-  // Salary: Average must be >= user's minimum
+  // Salary: Check firstYearSalary OR average (whichever is available)
   if (query.minSalary && query.minSalary > 0) {
-    filter['salary.average'] = { $gte: query.minSalary };
+    filter.$or = [
+      { 'salary.firstYearSalary': { $gte: query.minSalary } },
+      { 'salary.average': { $gte: query.minSalary } }
+    ];
   }
   
   // Start Date: Must be >= user's desired start date
@@ -63,6 +73,29 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
   // Education: Exact match or lower requirement
   if (query.educationLevel) {
     filter.education_required = query.educationLevel;
+  }
+  
+  // Tariff Type: Filter by specific tariff agreements
+  if (query.tariffTypes && query.tariffTypes.length > 0) {
+    filter.tariff_type = { $in: query.tariffTypes };
+  }
+  
+  // Relocation Support Filters
+  if (query.relocationSupport === true) {
+    filter['relocation_support.offered'] = true;
+  }
+  
+  if (query.rentSubsidy === true) {
+    filter['relocation_support.rent_subsidy'] = true;
+  }
+  
+  if (query.freeAccommodation === true) {
+    filter['relocation_support.free_accommodation'] = true;
+  }
+  
+  // Benefit Tags: Jobs must have ALL specified benefit tags
+  if (query.benefitTags && query.benefitTags.length > 0) {
+    filter.benefits_tags = { $all: query.benefitTags };
   }
   
   // === PHASE 3: FUZZY SEARCH ===

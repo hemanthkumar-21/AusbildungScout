@@ -12,45 +12,120 @@ const benefitMap: Record<string, string> = {
   'urlaub': 'VACATION_25',
   'vacation': 'VACATION_25',
   
-  // Salary
+  // Salary & Financial
   '13th salary': 'SALARY_13TH',
   '13. gehalt': 'SALARY_13TH',
   'weihnachtsgeld': 'SALARY_13TH',
+  'urlaubsgeld': 'VACATION_PAY',
   'bonus': 'SALARY_BONUS',
+  'erfolgsbeteiligung': 'PERFORMANCE_BONUS',
+  'prämie': 'SALARY_BONUS',
+  'altersvorsorge': 'PENSION_PLAN',
+  'betriebliche altersvorsorge': 'PENSION_PLAN',
+  'vermögenswirksame': 'VL',
+  'vwl': 'VL',
   
   // Food & Wellness
   'free food': 'FREE_FOOD',
+  'kostenloses essen': 'FREE_FOOD',
   'free lunch': 'FREE_FOOD',
+  'mittagessen': 'FREE_FOOD',
+  'kantine': 'CANTEEN',
   'free coffee': 'FREE_COFFEE',
+  'kaffee': 'FREE_COFFEE',
+  'obst': 'FREE_SNACKS',
+  'getränke': 'FREE_DRINKS',
   'gym': 'GYM',
   'fitness': 'GYM',
+  'fitnessstudio': 'GYM',
+  'gesundheitsförderung': 'HEALTH_PROMOTION',
   'health insurance': 'HEALTH_INSURANCE',
   'krankenkasse': 'HEALTH_INSURANCE',
+  'massages': 'WELLNESS',
+  'massage': 'WELLNESS',
   
-  // Equipment
+  // Equipment & Tech
   'laptop': 'LAPTOP',
+  'notebook': 'LAPTOP',
   'computer': 'LAPTOP',
+  'tablet': 'TABLET',
+  'smartphone': 'COMPANY_PHONE',
+  'handy': 'COMPANY_PHONE',
+  'equipment': 'TECH_EQUIPMENT',
+  
+  // Work Arrangement
   'home office': 'HOME_OFFICE',
   'remote': 'HOME_OFFICE',
   'homeoffice': 'HOME_OFFICE',
+  'mobiles arbeiten': 'REMOTE_WORK',
   'flexible working': 'FLEXIBLE_HOURS',
   'flexible hours': 'FLEXIBLE_HOURS',
+  'gleitzeit': 'FLEXIBLE_HOURS',
+  'teilzeit': 'PART_TIME_OPTION',
+  '4-tage-woche': 'FOUR_DAY_WEEK',
   
   // Travel & Mobility
   'bahn card': 'BAHN_CARD',
+  'bahncard': 'BAHN_CARD',
   'public transport': 'PUBLIC_TRANSPORT',
+  'jobticket': 'PUBLIC_TRANSPORT',
+  'deutschlandticket': 'PUBLIC_TRANSPORT',
+  'firmenwagen': 'COMPANY_CAR',
   'car': 'CAR_BENEFIT',
   'parking': 'PARKING',
+  'parkplatz': 'PARKING',
+  'fahrrad': 'BIKE_LEASE',
+  'bike leasing': 'BIKE_LEASE',
+  'jobrad': 'BIKE_LEASE',
   
-  // Learning
+  // Learning & Development
+  'weiterbildung': 'TRAINING',
   'training': 'TRAINING',
+  'fortbildung': 'TRAINING',
   'courses': 'TRAINING',
+  'schulung': 'TRAINING',
   'education': 'TRAINING',
+  'ausbildung': 'TRAINING',
   'english course': 'ENGLISH_COURSE',
+  'sprachkurs': 'LANGUAGE_COURSE',
+  'coaching': 'COACHING',
+  'mentoring': 'MENTORING',
+  'karriereentwicklung': 'CAREER_DEVELOPMENT',
   
-  // Mental Health
+  // Work Environment
+  'team events': 'TEAM_EVENTS',
+  'teamevents': 'TEAM_EVENTS',
+  'betriebsfest': 'COMPANY_EVENTS',
+  'firmenevents': 'COMPANY_EVENTS',
+  'modern office': 'MODERN_OFFICE',
+  'moderne büros': 'MODERN_OFFICE',
+  'küche': 'KITCHEN',
+  
+  // Family & Life Balance
+  'kindergarten': 'DAYCARE',
+  'kita': 'DAYCARE',
+  'kinderbetreuung': 'CHILDCARE',
+  'elternzeit': 'PARENTAL_LEAVE',
+  'sabbatical': 'SABBATICAL',
+  
+  // Mental Health & Wellbeing
   'mental health': 'MENTAL_HEALTH',
   'therapy': 'MENTAL_HEALTH',
+  'psychologische beratung': 'MENTAL_HEALTH',
+  'sports': 'SPORTS',
+  'sport': 'SPORTS',
+  
+  // Other Benefits
+  'mitarbeiterrabatte': 'EMPLOYEE_DISCOUNTS',
+  'employee discounts': 'EMPLOYEE_DISCOUNTS',
+  'corporate benefits': 'EMPLOYEE_DISCOUNTS',
+  'hund': 'PET_FRIENDLY',
+  'pet friendly': 'PET_FRIENDLY',
+  'haustier': 'PET_FRIENDLY',
+  'unbefristet': 'PERMANENT_CONTRACT',
+  'permanent': 'PERMANENT_CONTRACT',
+  'übernahmegarantie': 'JOB_GUARANTEE',
+  'übernahme': 'TAKEOVER_OPTION',
 };
 
 export function normalizeBenefits(rawBenefits: string[]): string[] {

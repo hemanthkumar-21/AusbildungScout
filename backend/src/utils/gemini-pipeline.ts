@@ -3,13 +3,14 @@
  * Converts raw German HTML text into structured JSON data
  */
 
-import { IJob, GermanLevel, EducationLevel } from '@/types';
+import { IJob, GermanLevel, EducationLevel, TariffType, IRelocationSupport } from '@/types';
 import {
   normalizeBenefits,
   normalizeTechStack,
   calculateSalaryAverage,
   normalizeDate,
 } from './normalizer';
+import { resolveFirstYearSalaryFast } from './salary-resolver';
 
 interface AIResponse {
   job_title: string;
@@ -32,8 +33,17 @@ interface AIResponse {
   salary_min?: number;
   salary_max?: number;
   tarifvertrag_only?: boolean;
+  tariff_type?: string; // New: Tariff/Union information
   visa_sponsorship?: boolean;
-  relocation_support?: boolean;
+  relocation_support?: {
+    offered?: boolean;
+    rent_subsidy?: boolean;
+    free_accommodation?: boolean;
+    moving_cost_covered?: boolean;
+    temporary_housing?: boolean;
+    relocation_bonus?: number;
+    details?: string;
+  };
   benefits?: string[];
   description_snippet?: string;
   contact_person?: {
@@ -114,6 +124,50 @@ function mapEducationLevel(input?: string): EducationLevel {
   return EducationLevel.REALSCHULE;
 }
 
+function mapTariffType(input?: string): TariffType {
+  if (!input || input === 'null' || input === 'not mentioned' || input === 'none' || input === 'None') {
+    return TariffType.NONE;
+  }
+  
+  const lower = input.toLowerCase();
+  
+  if (lower.includes('ig metall') || lower.includes('metall')) {
+    return TariffType.IG_METALL;
+  }
+  if (lower.includes('ver.di') || lower.includes('verdi')) {
+    return TariffType.VERDI;
+  }
+  if (lower.includes('ig bce') || lower.includes('chemie') || lower.includes('bergbau')) {
+    return TariffType.IG_BCE;
+  }
+  if (lower.includes('ig bau') || lower.includes('bau')) {
+    return TariffType.IG_BAU;
+  }
+  if (lower.includes('ngg') || lower.includes('nahrung')) {
+    return TariffType.NGG;
+  }
+  if (lower.includes('tvöd') || lower.includes('öffentlich')) {
+    return TariffType.TVÖD;
+  }
+  if (lower.includes('tv-l') || lower.includes('länder')) {
+    return TariffType.TV_L;
+  }
+  if (lower.includes('it tarif') || lower.includes('it-tarif')) {
+    return TariffType.IT_TARIFVERTRAG;
+  }
+  if (lower.includes('einzelhandel') || lower.includes('handel')) {
+    return TariffType.EINZELHANDEL;
+  }
+  if (lower.includes('bank') || lower.includes('sparkasse')) {
+    return TariffType.BANKING;
+  }
+  if (lower.includes('tarif')) {
+    return TariffType.OTHER;
+  }
+  
+  return TariffType.NONE;
+}
+
 /**
  * Process AI response and normalize it to match our schema
  */
@@ -166,20 +220,47 @@ export async function processAIResponse(
     
     const visaSponsorship = aiResponse.visa_sponsorship || hasVisaKeywords;
     
-    // Build salary object with proper type handling
+    // Map tariff type first (needed for salary resolution)
+    const tariffType = mapTariffType(aiResponse.tariff_type);
+    
+    // Resolve salary using priority: scraped > tariff standard > null
+    // Note: This uses the fast resolver (no company website check) for initial processing
+    // A separate background job can later fetch from company websites
+    const salaryResolution = resolveFirstYearSalaryFast(
+      aiResponse.salary?.firstYearSalary,
+      aiResponse.salary?.thirdYearSalary,
+      tariffType
+    );
+    
+    // Build salary object
     const salaryObj: any = {
       currency: 'EUR',
     };
     
-    if (aiResponse.salary?.firstYearSalary !== undefined) {
-      salaryObj.firstYearSalary = aiResponse.salary.firstYearSalary;
+    if (salaryResolution.firstYearSalary !== undefined) {
+      salaryObj.firstYearSalary = salaryResolution.firstYearSalary;
+      console.log(`[Salary] Set firstYearSalary from ${salaryResolution.source}: ${salaryResolution.firstYearSalary} EUR`);
     }
-    if (aiResponse.salary?.thirdYearSalary !== undefined) {
-      salaryObj.thirdYearSalary = aiResponse.salary.thirdYearSalary;
+    if (salaryResolution.thirdYearSalary !== undefined) {
+      salaryObj.thirdYearSalary = salaryResolution.thirdYearSalary;
     }
-    if (salaryAverage !== undefined) {
+    if (salaryResolution.average !== undefined) {
+      salaryObj.average = salaryResolution.average;
+    } else if (salaryAverage !== undefined) {
+      // Fallback to old calculation if resolver didn't provide average
       salaryObj.average = salaryAverage;
     }
+    
+    // Process relocation support
+    const relocationSupportObj: IRelocationSupport = {
+      offered: aiResponse.relocation_support?.offered || false,
+      ...(aiResponse.relocation_support?.rent_subsidy && { rent_subsidy: aiResponse.relocation_support.rent_subsidy }),
+      ...(aiResponse.relocation_support?.free_accommodation && { free_accommodation: aiResponse.relocation_support.free_accommodation }),
+      ...(aiResponse.relocation_support?.moving_cost_covered && { moving_cost_covered: aiResponse.relocation_support.moving_cost_covered }),
+      ...(aiResponse.relocation_support?.temporary_housing && { temporary_housing: aiResponse.relocation_support.temporary_housing }),
+      ...(aiResponse.relocation_support?.relocation_bonus && { relocation_bonus: aiResponse.relocation_support.relocation_bonus }),
+      ...(aiResponse.relocation_support?.details && { details: aiResponse.relocation_support.details }),
+    };
     
     const normalizedJob: Partial<IJob> = {
       job_title: aiResponse.job_title,
@@ -195,8 +276,9 @@ export async function processAIResponse(
       ...(techStack.length > 0 && { tech_stack: techStack }),
       ...(aiResponse.driving_license_required && { driving_license_required: aiResponse.driving_license_required }),
       salary: salaryObj,
+      tariff_type: tariffType,
       visa_sponsorship: visaSponsorship,
-      ...(aiResponse.relocation_support && { relocation_support: aiResponse.relocation_support }),
+      relocation_support: relocationSupportObj,
       ...(aiResponse.benefits && aiResponse.benefits.length > 0 && { benefits: aiResponse.benefits }),
       ...(benefitsTags.length > 0 && { benefits_tags: benefitsTags }),
       ...(aiResponse.description_snippet && { description_snippet: aiResponse.description_snippet }),
@@ -229,19 +311,40 @@ Rules:
 2. Salary: Extract only firstYearSalary and thirdYearSalary when available.
    If only "Tarifvertrag" is mentioned, return null (don't guess).
 
-3. Visa sponsorship: Set to true ONLY if these keywords appear:
+3. Tariff Type: Identify collective bargaining agreement (Tarifvertrag) if mentioned:
+   - "IG Metall" for metal/electrical engineering
+   - "ver.di" for services union
+   - "IG BCE" for chemical/mining/energy
+   - "IG BAU" for construction
+   - "NGG" for food/beverage/hospitality
+   - "TVöD" for public sector
+   - "TV-L" for state public sector
+   - "Banking" for banking sector
+   - "Other" for other tariff agreements
+   - null if not mentioned
+
+4. Visa sponsorship: Set to true ONLY if these keywords appear:
    "Relocation support", "Visa assistance", "International applicants welcome", "Blue Card"
    Otherwise, false.
 
-4. Education level: Map to Hauptschulabschluss, Realschulabschluss, Abitur, Fachabitur, or null.
+5. Relocation Support: Extract detailed relocation information:
+   - offered: true if ANY relocation support mentioned
+   - rent_subsidy: true if rent assistance/subsidy mentioned
+   - free_accommodation: true if free housing/lodging provided
+   - moving_cost_covered: true if moving/relocation costs reimbursed
+   - temporary_housing: true if temporary accommodation provided
+   - relocation_bonus: extract amount in EUR if mentioned
+   - details: any additional relocation information
 
-5. Tech stack: Lowercase, remove duplicates, return empty array if none mentioned.
+6. Education level: Map to Hauptschulabschluss, Realschulabschluss, Abitur, Fachabitur, or null.
 
-6. Benefits: Extract and list (e.g., "30 Tage Urlaub", "Kostenlos Kaffee"), empty array if none.
+7. Tech stack: Lowercase, remove duplicates, return empty array if none mentioned.
 
-7. Dates: Standardize to ISO format (YYYY-MM-DD).
+8. Benefits: Extract ALL benefits mentioned (e.g., "30 Tage Urlaub", "Kostenlos Kaffee", "Betriebliche Altersvorsorge", "Weiterbildung", "HomeOffice"), empty array if none.
 
-8. All optional fields (like english_level_requirement, german_level_requirement): use null if not mentioned, NOT empty strings.
+9. Dates: Standardize to ISO format (YYYY-MM-DD).
+
+10. All optional fields (like english_level_requirement, german_level_requirement): use null if not mentioned, NOT empty strings.
 
 Response as JSON (no markdown, raw JSON only):
 {
@@ -261,8 +364,17 @@ Response as JSON (no markdown, raw JSON only):
     "firstYearSalary": number or null,
     "thirdYearSalary": number or null
   },
+  "tariff_type": "IG Metall" | "ver.di" | "IG BCE" | "IG BAU" | "NGG" | "TVöD" | "TV-L" | "Banking" | "Other" | null,
   "visa_sponsorship": boolean,
-  "relocation_support": boolean or null,
+  "relocation_support": {
+    "offered": boolean,
+    "rent_subsidy": boolean or null,
+    "free_accommodation": boolean or null,
+    "moving_cost_covered": boolean or null,
+    "temporary_housing": boolean or null,
+    "relocation_bonus": number or null,
+    "details": "string or null"
+  },
   "benefits": ["string"] or [],
   "description_snippet": "string (short summary, max 200 chars)" or null
 }

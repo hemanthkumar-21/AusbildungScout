@@ -29,6 +29,22 @@ export enum EducationLevel {
   FACHABITUR = 'Fachabitur',           // Vocational Diploma
 }
 
+// Collective Bargaining Agreement (Tarifvertrag) Types
+export enum TariffType {
+  NONE = 'None',
+  IG_METALL = 'IG Metall',           // Metal and electrical engineering union
+  VERDI = 'ver.di',                  // United services union
+  IG_BCE = 'IG BCE',                 // Mining, chemical, energy union
+  IG_BAU = 'IG BAU',                 // Construction union
+  NGG = 'NGG',                       // Food, beverage, hospitality union
+  TVÖD = 'TVöD',                     // Public sector
+  TV_L = 'TV-L',                     // State public sector
+  IT_TARIFVERTRAG = 'IT Tarifvertrag', // IT collective agreement
+  EINZELHANDEL = 'Einzelhandel',     // Retail
+  BANKING = 'Banking',               // Banking sector
+  OTHER = 'Other',                   // Other tariff agreements
+}
+
 // --- Interfaces ---
 export interface ILocation {
   city: string;
@@ -49,6 +65,17 @@ export interface IContact {
   email?: string;
   phone?: string;
   role?: string; // e.g., "Recruiter"
+}
+
+// Enhanced Relocation Support Details
+export interface IRelocationSupport {
+  offered: boolean;                    // Whether any relocation support exists
+  rent_subsidy?: boolean;               // Rent subsidy provided
+  free_accommodation?: boolean;         // Free stay/housing provided
+  moving_cost_covered?: boolean;        // Moving costs reimbursed
+  temporary_housing?: boolean;          // Temporary housing during transition
+  relocation_bonus?: number;            // One-time relocation bonus (in EUR)
+  details?: string;                     // Additional details
 }
 
 export interface IJob extends Document {
@@ -72,12 +99,15 @@ export interface IJob extends Document {
   
   // Financials
   salary?: ISalary;
+  tariff_type?: TariffType; // Collective bargaining agreement type
   visa_sponsorship?: boolean; // Vital for international applicants
-  relocation_support?: boolean; // e.g., "Help with apartment"
+  relocation_support?: IRelocationSupport; // Detailed relocation information
   
   // Benefits (Structured for Filters)
   benefits?: string[]; // Raw text list e.g. "Free Gym"
   benefits_tags?: string[]; // Standardized tags: ["30_DAYS_VACATION", "LAPTOP", "CANTEEN", "13TH_SALARY"]
+  benefits_verified?: boolean; // Whether benefits were verified from official company source
+  benefits_last_updated?: Date; // Last time benefits were updated from official source
   
   // Meta
   description_full?: string; // The full raw text for search

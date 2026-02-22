@@ -24,6 +24,13 @@ export const jobsApi = {
     if (filters.page) params.append('page', String(filters.page));
     if (filters.limit) params.append('limit', String(filters.limit));
     
+    // New filters
+    if (filters.tariffTypes) params.append('tariffTypes', filters.tariffTypes);
+    if (filters.relocationSupport) params.append('relocationSupport', String(filters.relocationSupport));
+    if (filters.rentSubsidy) params.append('rentSubsidy', String(filters.rentSubsidy));
+    if (filters.freeAccommodation) params.append('freeAccommodation', String(filters.freeAccommodation));
+    if (filters.benefitTags) params.append('benefitTags', filters.benefitTags);
+    
     const response = await api.get<JobsResponse>(`/jobs?${params.toString()}`);
     return response.data;
   },

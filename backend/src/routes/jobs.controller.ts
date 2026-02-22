@@ -23,6 +23,12 @@ export async function getJobs(req: Request, res: Response) {
       searchTerm: req.query.search as string,
       page: req.query.page ? parseInt(req.query.page as string) : 1,
       limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
+      // New filters
+      tariffTypes: req.query.tariffTypes ? (req.query.tariffTypes as string).split(',') as any[] : undefined,
+      relocationSupport: req.query.relocationSupport === 'true',
+      rentSubsidy: req.query.rentSubsidy === 'true',
+      freeAccommodation: req.query.freeAccommodation === 'true',
+      benefitTags: req.query.benefitTags ? (req.query.benefitTags as string).split(',') : undefined,
     };
     
     // Build MongoDB filter

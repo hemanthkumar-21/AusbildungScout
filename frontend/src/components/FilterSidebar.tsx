@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { JobFilterQuery } from '../types';
-import { GermanLevel, EducationLevel } from '../types';
+import { GermanLevel, EducationLevel, TariffType } from '../types';
 
 interface FilterSidebarProps {
   filters: JobFilterQuery;
@@ -26,9 +26,9 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6 sticky top-4">
+    <div className="bg-white rounded-lg shadow-md sticky top-4 max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 flex-shrink-0">
         <h2 className="text-xl font-bold text-gray-900">Filters</h2>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
@@ -38,9 +38,9 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
         </button>
       </div>
 
-      {/* Content */}
-      <div className={`space-y-6 ${!isExpanded ? 'hidden lg:block' : ''}`}>
-        {/* Search */}
+      {/* Content - Scrollable with hidden scrollbar */}
+      <div className={`overflow-y-auto flex-1 px-6 py-4 scrollbar-hide ${!isExpanded ? 'hidden lg:block' : ''}`}>
+        <div className="space-y-6">{/* Search */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Search
@@ -137,8 +137,108 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
           </label>
         </div>
 
+        {/* Tariff Type */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Tariff Agreement
+          </label>
+          <select
+            value={filters.tariffTypes || ''}
+            onChange={(e) => handleInputChange('tariffTypes', e.target.value || undefined)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="">Any</option>
+            {Object.values(TariffType).map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Relocation Support Section */}
+        <div className="border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Relocation Support</h3>
+          
+          <div className="space-y-2">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.relocationSupport || false}
+                onChange={(e) => handleInputChange('relocationSupport', e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Any Relocation Support</span>
+            </label>
+
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.rentSubsidy || false}
+                onChange={(e) => handleInputChange('rentSubsidy', e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Rent Subsidy</span>
+            </label>
+
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.freeAccommodation || false}
+                onChange={(e) => handleInputChange('freeAccommodation', e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Free Accommodation</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Popular Benefits Section */}
+        <div className="border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Must-Have Benefits</h3>
+          <p className="text-xs text-gray-500 mb-2">Select benefits that must be offered</p>
+          
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {[
+              { value: 'HOME_OFFICE', label: 'Home Office' },
+              { value: 'LAPTOP', label: 'Laptop Provided' },
+              { value: 'FLEXIBLE_HOURS', label: 'Flexible Hours' },
+              { value: 'VACATION_30', label: '30 Days Vacation' },
+              { value: 'SALARY_13TH', label: '13th Month Salary' },
+              { value: 'PENSION_PLAN', label: 'Pension Plan' },
+              { value: 'TRAINING', label: 'Training/Education' },
+              { value: 'GYM', label: 'Gym/Fitness' },
+              { value: 'CANTEEN', label: 'Canteen' },
+              { value: 'PUBLIC_TRANSPORT', label: 'Public Transport Ticket' },
+              { value: 'BIKE_LEASE', label: 'Bike Leasing' },
+              { value: 'COMPANY_CAR', label: 'Company Car' },
+            ].map(({ value, label }) => {
+              const currentTags = filters.benefitTags ? filters.benefitTags.split(',') : [];
+              const isChecked = currentTags.includes(value);
+              
+              return (
+                <label key={value} className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => {
+                      const tags = currentTags.filter(t => t !== value);
+                      if (e.target.checked) {
+                        tags.push(value);
+                      }
+                      handleInputChange('benefitTags', tags.length > 0 ? tags.join(',') : undefined);
+                    }}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">{label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Action Buttons */}
-        <div className="space-y-2 pt-4">
+        <div className="space-y-2 pt-4 pb-2">
           <button
             onClick={onSearch}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors"
@@ -151,6 +251,7 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
           >
             Reset
           </button>
+        </div>
         </div>
       </div>
     </div>

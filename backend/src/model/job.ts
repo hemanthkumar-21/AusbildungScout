@@ -1,4 +1,4 @@
-import { IJob, EducationLevel, GermanLevel } from '@/types';
+import { IJob, EducationLevel, GermanLevel, TariffType } from '@/types';
 import mongoose, { Schema } from 'mongoose';
 
 
@@ -49,13 +49,31 @@ const JobSchema: Schema = new Schema({
     currency: { type: String, default: 'EUR' }
   },
   
+  // Tariff/Union Information
+  tariff_type: {
+    type: String,
+    enum: Object.values(TariffType),
+    default: TariffType.NONE,
+    index: true // Index for filtering by tariff type
+  },
+  
   // Critical International Filters
   visa_sponsorship: { type: Boolean, default: false, index: true },
-  relocation_support: { type: Boolean, default: false },
+  relocation_support: {
+    offered: { type: Boolean, default: false, index: true },
+    rent_subsidy: { type: Boolean, default: false },
+    free_accommodation: { type: Boolean, default: false },
+    moving_cost_covered: { type: Boolean, default: false },
+    temporary_housing: { type: Boolean, default: false },
+    relocation_bonus: Number,
+    details: String
+  },
 
   // Benefits
   benefits: [String], // Display text
   benefits_tags: [{ type: String, index: true }], // Machine readable tags for checkboxes
+  benefits_verified: { type: Boolean, default: false }, // Whether benefits verified from official source
+  benefits_last_updated: { type: Date }, // Last verification timestamp
 
   // Content
   description_full: { type: String }, 

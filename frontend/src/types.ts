@@ -21,6 +21,23 @@ export const EducationLevel = {
 
 export type EducationLevel = typeof EducationLevel[keyof typeof EducationLevel];
 
+export const TariffType = {
+  NONE: 'None',
+  IG_METALL: 'IG Metall',
+  VERDI: 'ver.di',
+  IG_BCE: 'IG BCE',
+  IG_BAU: 'IG BAU',
+  NGG: 'NGG',
+  TVOEDE: 'TVöD',
+  TV_L: 'TV-L',
+  IT_TARIFVERTRAG: 'IT Tarifvertrag',
+  EINZELHANDEL: 'Einzelhandel',
+  BANKING: 'Banking',
+  OTHER: 'Other',
+} as const;
+
+export type TariffType = typeof TariffType[keyof typeof TariffType];
+
 export interface ILocation {
   city: string;
   zip_code?: string;
@@ -42,6 +59,16 @@ export interface IContact {
   role?: string;
 }
 
+export interface IRelocationSupport {
+  offered: boolean;
+  rent_subsidy?: boolean;
+  free_accommodation?: boolean;
+  moving_cost_covered?: boolean;
+  temporary_housing?: boolean;
+  relocation_bonus?: number;
+  details?: string;
+}
+
 export interface IJob {
   _id: string;
   job_title: string;
@@ -57,10 +84,13 @@ export interface IJob {
   tech_stack?: string[];
   driving_license_required?: boolean;
   salary?: ISalary;
+  tariff_type?: TariffType;
   visa_sponsorship?: boolean;
-  relocation_support?: boolean;
+  relocation_support?: IRelocationSupport;
   benefits?: string[];
   benefits_tags?: string[];
+  benefits_verified?: boolean;
+  benefits_last_updated?: string;
   description_full?: string;
   description_snippet?: string;
   original_link?: string;
@@ -80,6 +110,12 @@ export interface JobFilterQuery {
   search?: string;
   page?: number;
   limit?: number;
+  // New filters
+  tariffTypes?: string;
+  relocationSupport?: boolean;
+  rentSubsidy?: boolean;
+  freeAccommodation?: boolean;
+  benefitTags?: string;
 }
 
 export interface PaginationInfo {

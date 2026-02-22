@@ -163,6 +163,15 @@ export default function JobDetails({ job, onClose }: JobDetailsProps) {
             <h3 className="text-lg font-semibold mb-3 text-gray-900">
               Benefits & Support
             </h3>
+            
+            {/* Tariff Information */}
+            {job.tariff_type && job.tariff_type !== 'None' && (
+              <div className="mb-3 bg-purple-50 p-3 rounded-lg">
+                <span className="font-medium text-gray-700">Collective Agreement:</span>{' '}
+                <span className="text-purple-700 font-semibold">{job.tariff_type}</span>
+              </div>
+            )}
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {job.visa_sponsorship && (
                 <div className="flex items-center text-green-700">
@@ -172,7 +181,7 @@ export default function JobDetails({ job, onClose }: JobDetailsProps) {
                   Visa Sponsorship
                 </div>
               )}
-              {job.relocation_support && (
+              {job.relocation_support?.offered && (
                 <div className="flex items-center text-green-700">
                   <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -181,13 +190,48 @@ export default function JobDetails({ job, onClose }: JobDetailsProps) {
                 </div>
               )}
             </div>
+            
+            {/* Detailed Relocation Support */}
+            {job.relocation_support?.offered && (
+              <div className="mt-3 bg-green-50 p-4 rounded-lg">
+                <h4 className="font-semibold text-gray-900 mb-2">Relocation Package:</h4>
+                <ul className="list-disc list-inside text-gray-700 space-y-1">
+                  {job.relocation_support.rent_subsidy && <li>Rent Subsidy Provided</li>}
+                  {job.relocation_support.free_accommodation && <li>Free Accommodation</li>}
+                  {job.relocation_support.moving_cost_covered && <li>Moving Costs Covered</li>}
+                  {job.relocation_support.temporary_housing && <li>Temporary Housing Available</li>}
+                  {job.relocation_support.relocation_bonus && (
+                    <li>Relocation Bonus: {job.relocation_support.relocation_bonus} EUR</li>
+                  )}
+                  {job.relocation_support.details && <li>{job.relocation_support.details}</li>}
+                </ul>
+              </div>
+            )}
+            
             {job.benefits && job.benefits.length > 0 && (
               <div className="mt-3">
+                <h4 className="font-medium text-gray-900 mb-2">Additional Benefits:</h4>
                 <ul className="list-disc list-inside text-gray-700 space-y-1">
                   {job.benefits.map((benefit, idx) => (
                     <li key={idx}>{benefit}</li>
                   ))}
                 </ul>
+              </div>
+            )}
+            
+            {/* Benefit Tags */}
+            {job.benefits_tags && job.benefits_tags.length > 0 && (
+              <div className="mt-3">
+                <div className="flex flex-wrap gap-2">
+                  {job.benefits_tags.map((tag, idx) => (
+                    <span
+                      key={idx}
+                      className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium"
+                    >
+                      {tag.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>

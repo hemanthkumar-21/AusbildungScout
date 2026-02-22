@@ -77,7 +77,7 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
           {/* Sidebar */}
           <aside className="lg:col-span-1">
             <FilterSidebar
@@ -88,8 +88,7 @@ function App() {
           </aside>
 
           {/* Job List */}
-          <div className="lg:col-span-3">
-            {/* Results Summary */}
+          <div className="lg:col-span-3">{/* Results Summary */}
             <div className="mb-6">
               <h2 className="text-xl font-semibold text-gray-900">
                 {loading ? 'Loading...' : `${pagination.total} Jobs Found`}

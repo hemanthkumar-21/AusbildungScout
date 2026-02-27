@@ -28,7 +28,7 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
   return (
     <div className="bg-white rounded-lg shadow-md sticky top-4 max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 flex-shrink-0">
+      <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 shrink-0">
         <h2 className="text-xl font-bold text-gray-900">Filters</h2>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
@@ -53,6 +53,22 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             onKeyPress={(e) => e.key === 'Enter' && onSearch()}
           />
+        </div>
+
+        {/* Sort Order */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Sort By
+          </label>
+          <select
+            value={filters.sortBy || 'default'}
+            onChange={(e) => handleInputChange('sortBy', e.target.value === 'default' ? undefined : e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="default">Recently Posted</option>
+            <option value="salary-high">Salary: High to Low</option>
+            <option value="salary-low">Salary: Low to High</option>
+          </select>
         </div>
 
         {/* German Level */}
@@ -107,6 +123,40 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
             step="100"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
+        </div>
+
+        {/* Minimum Vacancies */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Min. Open Positions
+          </label>
+          <input
+            type="number"
+            value={filters.minVacancies || ''}
+            onChange={(e) => handleInputChange('minVacancies', e.target.value ? parseInt(e.target.value) : undefined)}
+            placeholder="e.g., 1"
+            min="1"
+            step="1"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+
+        {/* Hide Inactive Jobs */}
+        <div>
+          <label className="flex items-center space-x-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filters.hideInactive || false}
+              onChange={(e) => handleInputChange('hideInactive', e.target.checked)}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">
+              Hide Inactive/Stale Jobs
+            </span>
+          </label>
+          <p className="text-xs text-gray-500 ml-6 mt-1">
+            Hide jobs that are no longer available
+          </p>
         </div>
 
         {/* Start Date */}

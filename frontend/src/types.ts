@@ -78,6 +78,7 @@ export interface IJob {
   duration_months?: number;
   application_deadline?: string;
   available_positions?: number;
+  vacancy_count?: number;
   german_level_requirement?: GermanLevel;
   english_level_requirement?: GermanLevel;
   education_required?: EducationLevel;
@@ -116,6 +117,9 @@ export interface JobFilterQuery {
   rentSubsidy?: boolean;
   freeAccommodation?: boolean;
   benefitTags?: string;
+  minVacancies?: number;
+  hideInactive?: boolean;
+  sortBy?: 'salary-high' | 'salary-low' | 'default';
 }
 
 export interface PaginationInfo {

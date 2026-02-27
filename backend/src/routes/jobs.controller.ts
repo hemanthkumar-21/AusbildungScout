@@ -13,23 +13,27 @@ import { buildMongoDBFilter, getPaginationParams, buildSortOptions, JobFilterQue
  */
 export async function getJobs(req: Request, res: Response) {
   try {
-    // Extract query parameters
+    // Extract query parameters - build object dynamically to avoid undefined values
     const query: JobFilterQuery = {
-      germanLevel: req.query.germanLevel as any,
-      visaNeed: req.query.visaNeed === 'true',
-      minSalary: req.query.minSalary ? parseInt(req.query.minSalary as string) : undefined,
-      startDate: req.query.startDate as string,
-      educationLevel: req.query.educationLevel as string,
-      searchTerm: req.query.search as string,
       page: req.query.page ? parseInt(req.query.page as string) : 1,
       limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-      // New filters
-      tariffTypes: req.query.tariffTypes ? (req.query.tariffTypes as string).split(',') as any[] : undefined,
-      relocationSupport: req.query.relocationSupport === 'true',
-      rentSubsidy: req.query.rentSubsidy === 'true',
-      freeAccommodation: req.query.freeAccommodation === 'true',
-      benefitTags: req.query.benefitTags ? (req.query.benefitTags as string).split(',') : undefined,
     };
+    
+    // Add optional filters only if they have values
+    if (req.query.germanLevel) query.germanLevel = req.query.germanLevel as any;
+    if (req.query.visaNeed === 'true') query.visaNeed = true;
+    if (req.query.minSalary) query.minSalary = parseInt(req.query.minSalary as string);
+    if (req.query.startDate) query.startDate = req.query.startDate as string;
+    if (req.query.educationLevel) query.educationLevel = req.query.educationLevel as string;
+    if (req.query.search) query.searchTerm = req.query.search as string;
+    if (req.query.minVacancies) query.minVacancies = parseInt(req.query.minVacancies as string);
+    if (req.query.tariffTypes) query.tariffTypes = (req.query.tariffTypes as string).split(',') as any[];
+    if (req.query.relocationSupport === 'true') query.relocationSupport = true;
+    if (req.query.rentSubsidy === 'true') query.rentSubsidy = true;
+    if (req.query.freeAccommodation === 'true') query.freeAccommodation = true;
+    if (req.query.benefitTags) query.benefitTags = (req.query.benefitTags as string).split(',');
+    if (req.query.hideInactive === 'true') query.hideInactive = true;
+    if (req.query.sortBy) query.sortBy = req.query.sortBy as any;
     
     // Build MongoDB filter
     const filter = buildMongoDBFilter(query);
@@ -38,7 +42,7 @@ export async function getJobs(req: Request, res: Response) {
     const { skip, limit } = getPaginationParams(query.page, query.limit);
     
     // Build sort options
-    const sort = buildSortOptions(query.searchTerm);
+    const sort = buildSortOptions(query.searchTerm, query.sortBy);
     
     // Execute query
     const jobs = await Job.find(filter)

@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import type { IJob } from '../types';
 
 interface JobDetailsProps {
@@ -6,25 +8,65 @@ interface JobDetailsProps {
 }
 
 export default function JobDetails({ job, onClose }: JobDetailsProps) {
+  useEffect(() => {
+    // Scroll to top when component mounts
+    window.scrollTo(0, 0);
+    
+    // Add ESC key listener to close
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+      <div className="min-h-screen bg-gray-50">
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex justify-between items-start">
-          <div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">
-              {job.job_title}
-            </h2>
-            <p className="text-xl text-gray-700 font-semibold">
-              {job.company_name}
-            </p>
+        <div className="sticky top-0 bg-white border-b border-gray-200 shadow-sm z-10">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex justify-between items-start">
+            <div className="flex-1">
+              <h2 className="text-3xl font-bold text-gray-900 mb-2">
+                {job.job_title}
+              </h2>
+              <p className="text-xl text-gray-700 font-semibold">
+                {job.company_name}
+              </p>
+            </div>
+            <Link
+              to="/"
+              className="ml-4 shrink-0 bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 rounded-full p-2 transition-colors inline-flex items-center justify-center"
+              aria-label="Close"
+            >
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </Link>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+        </div>
+
+        {/* Content */}
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Back Button */}
+          <Link
+            to="/"
+            className="mb-6 inline-flex items-center text-blue-600 hover:text-blue-700 font-medium"
           >
             <svg
-              className="w-6 h-6"
+              className="w-5 h-5 mr-2"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -33,14 +75,11 @@ export default function JobDetails({ job, onClose }: JobDetailsProps) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
+                d="M15 19l-7-7 7-7"
               />
             </svg>
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6">
+            Back to Jobs
+          </Link>
           {/* Location */}
           <div className="mb-6">
             <h3 className="text-lg font-semibold mb-2 text-gray-900">

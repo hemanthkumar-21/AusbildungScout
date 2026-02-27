@@ -89,6 +89,7 @@ export interface IJob extends Document {
   duration_months?: number; // e.g., 36
   application_deadline?: Date;
   available_positions?: number; // e.g., 2
+  vacancy_count?: number; // Number of open positions (from listing page)
   
   // Requirements
   german_level_requirement?: GermanLevel;

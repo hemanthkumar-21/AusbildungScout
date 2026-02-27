@@ -19,6 +19,7 @@ const JobSchema: Schema = new Schema({
   duration_months: { type: Number, default: 36 },
   application_deadline: { type: Date },
   available_positions: { type: Number },
+  vacancy_count: { type: Number, default: 1, index: true }, // Number of open positions (from listing page)
 
   // Requirements
   german_level_requirement: { 

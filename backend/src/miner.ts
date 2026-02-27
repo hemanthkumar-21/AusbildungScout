@@ -260,101 +260,194 @@ ${html}
   }
 
   /**
-   * Main mining process
+   * Main mining process with new architecture:
+   * 1. Scrape ALL jobs from listing page (basic info only)
+   * 2. For each job: check DB, update if exists, or scrape+save if new
+   * 3. Mark jobs not in listing as inactive (don't delete)
    */
   async mine(): Promise<void> {
     try {
       console.log('🔍 Starting Job Miner...');
-      console.log(`📍 Target URLs: ${this.config.urls.join(', ')}`);
       console.log(`🎯 Max jobs per run: ${this.config.maxJobsPerRun}`);
       
       // Connect to database
       await connectDB();
       console.log('✓ Database connected');
       
-      // First: Verify old jobs (30+ days old)
-      await this.verifyOldJobs();
+      // === PHASE 1: Scrape ALL jobs from listing page ===
+      console.log('\n📋 PHASE 1: Scraping all available jobs from listing page...');
+      const allListedJobs = await this.scraper.getAllJobsFromListing();
       
-      let totalProcessed = 0;
+      if (allListedJobs.length === 0) {
+        console.log('⚠️ No jobs found on listing page. Exiting.');
+        return;
+      }
       
-      for (const sourceUrl of this.config.urls) {
-        console.log(`\n🕷️  Scraping from: ${sourceUrl}`);
+      console.log(`📊 Found ${allListedJobs.length} jobs on listing page`);
+      
+      // Create a map for quick lookup
+      const listedJobUrls = new Set(allListedJobs.map(j => j.url));
+      
+      // === PHASE 2: Process each listed job ===
+      console.log('\n📋 PHASE 2: Processing jobs (update existing or add new)...');
+      
+      let processed = 0;
+      let updated = 0;
+      let added = 0;
+      let skipped = 0;
+      
+      for (const listedJob of allListedJobs) {
+        if (processed >= this.config.maxJobsPerRun) {
+          console.log(`⏹️ Reached max jobs limit (${this.config.maxJobsPerRun})`);
+          break;
+        }
         
-        // Get job listings
-        const jobUrls = await this.scraper.getJobListings(sourceUrl);
-        console.log(`📄 Found ${jobUrls.length} job listings`);
-        
-        let jobIndex = 0;
-        for (const jobUrl of jobUrls) {
-          jobIndex++;
-          if (totalProcessed >= this.config.maxJobsPerRun) {
-            console.log(`⏹️  Reached max jobs limit (${this.config.maxJobsPerRun})`);
-            break;
-          }
+        try {
+          // Check if job exists in DB
+          const existingJob = await Job.findOne({ original_link: listedJob.url });
           
-          // Check for duplicates
-          const isDuplicate = await Job.findOne({ original_link: jobUrl });
-          if (isDuplicate) {
-            console.log(`⏭️  Skipping duplicate: ${jobUrl}`);
-            continue;
-          }
-          
-          // Scrape job page
-          const html = await this.scraper.scrapeJobPage(jobUrl);
-          if (!html) {
-            console.log(`⚠️  Failed to scrape: ${jobUrl}`);
-            continue;
-          }
-          
-          // Save raw HTML before any processing (will be deleted after successful save)
-          const rawFilePath = this.saveRawHTML(html, jobUrl, jobIndex);
-          
-          // Clean HTML
-          const cleanedHtml = this.scraper.cleanHTML(html);
-          
-          // Analyze with Gemini
-          const aiJobData = await this.analyzeWithGemini(cleanedHtml, jobUrl);
-          if (!aiJobData) {
-            console.log(`⚠️  AI analysis failed for: ${jobUrl}`);
-            // Delete raw file since processing failed
-            this.deleteRawFiles(rawFilePath);
-            continue;
-          }
-          
-          // Enrich salary if enabled and needed
-          if (this.config.enrichSalary && await this.shouldEnrichSalary(aiJobData)) {
-            await this.enrichJobSalary(aiJobData);
-          }
-          
-          // Normalize and save
-          if (!this.config.dryRun) {
-            try {
-              const job = new Job(aiJobData);
-              await job.save();
-              console.log(`✓ Saved: ${aiJobData.job_title} at ${aiJobData.company_name}`);
-              // Delete raw files after successful save
-              this.deleteRawFiles(rawFilePath);
-            } catch (error) {
-              console.error(`✗ Failed to save job: ${error}`);
-              // Keep raw file for debugging if save failed
+          if (existingJob) {
+            // Job exists - just update vacancy count if changed
+            const currentVacancy = existingJob.vacancy_count || 1;
+            const newVacancy = listedJob.vacancyCount || 1;
+            
+            if (currentVacancy !== newVacancy) {
+              console.log(`✏️ Updating: ${listedJob.title} (${currentVacancy} → ${newVacancy} positions)`);
+              if (!this.config.dryRun) {
+                await Job.findByIdAndUpdate(existingJob._id, {
+                  vacancy_count: newVacancy,
+                  is_active: true,
+                  last_checked_at: new Date(),
+                });
+              }
+              updated++;
+            } else {
+              // Just update timestamp to mark as checked
+              if (!this.config.dryRun) {
+                await Job.findByIdAndUpdate(existingJob._id, {
+                  is_active: true,
+                  last_checked_at: new Date(),
+                });
+              }
+              skipped++;
             }
           } else {
-            console.log(`[DRY RUN] Would save: ${aiJobData.job_title}`);
-            // In dry run, delete immediately since we're just testing
-            this.deleteRawFiles(rawFilePath);
+            // New job - do full scraping and analysis
+            console.log(`➕ New job found: ${listedJob.title} at ${listedJob.company}`);
+            
+            // Scrape full job page
+            const html = await this.scraper.scrapeJobPage(listedJob.url);
+            if (!html) {
+              console.log(`⚠️ Failed to scrape: ${listedJob.url}`);
+              continue;
+            }
+            
+            // Save raw HTML
+            const rawFilePath = this.saveRawHTML(html, listedJob.url, processed + 1);
+            
+            // Clean and analyze with AI
+            const cleanedHtml = this.scraper.cleanHTML(html);
+            const aiJobData = await this.analyzeWithGemini(cleanedHtml, listedJob.url);
+            
+            if (!aiJobData) {
+              console.log(`⚠️ AI analysis failed for: ${listedJob.url}`);
+              this.deleteRawFiles(rawFilePath);
+              continue;
+            }
+            
+            // Add vacancy count from listing page
+            aiJobData.vacancy_count = listedJob.vacancyCount || 1;
+            
+            // Enrich salary if needed
+            if (this.config.enrichSalary && await this.shouldEnrichSalary(aiJobData)) {
+              await this.enrichJobSalary(aiJobData);
+            }
+            
+            // Save to database
+            if (!this.config.dryRun) {
+              try {
+                const job = new Job(aiJobData);
+                await job.save();
+                console.log(`✓ Added: ${aiJobData.job_title} at ${aiJobData.company_name}`);
+                this.deleteRawFiles(rawFilePath);
+                added++;
+              } catch (error) {
+                console.error(`✗ Failed to save job: ${error}`);
+              }
+            } else {
+              console.log(`[DRY RUN] Would add: ${aiJobData.job_title}`);
+              this.deleteRawFiles(rawFilePath);
+              added++;
+            }
           }
           
-          totalProcessed++;
+          processed++;
+          
+          // Progress update every 10 jobs
+          if (processed % 10 === 0) {
+            console.log(`📊 Progress: ${processed}/${Math.min(allListedJobs.length, this.config.maxJobsPerRun)} jobs processed`);
+          }
+          
+        } catch (error) {
+          console.error(`⚠️ Error processing job ${listedJob.url}:`, error);
         }
       }
       
-      console.log(`\n🎉 Mining complete! Processed ${totalProcessed} jobs`);
+      // === PHASE 3: Mark unlisted jobs as inactive ===
+      console.log('\n📋 PHASE 3: Checking for jobs no longer listed...');
+      await this.markUnlistedJobsAsInactive(listedJobUrls);
+      
+      // Summary
+      console.log(`\n🎉 Mining complete!`);
+      console.log(`   📊 Total processed: ${processed}`);
+      console.log(`   ➕ New jobs added: ${added}`);
+      console.log(`   ✏️  Jobs updated: ${updated}`);
+      console.log(`   ⏭️  Jobs unchanged: ${skipped}`);
+      
     } catch (error) {
       console.error('❌ Mining failed:', error);
       process.exit(1);
     } finally {
       await this.scraper.close();
       process.exit(0);
+    }
+  }
+
+  /**
+   * Mark jobs not in the listing as inactive (preserve historical data)
+   */
+  private async markUnlistedJobsAsInactive(listedJobUrls: Set<string>): Promise<void> {
+    try {
+      // Find all active jobs in DB
+      const allDbJobs = await Job.find({ is_active: true }).select('_id original_link job_title company_name');
+      
+      let markedInactive = 0;
+      
+      for (const dbJob of allDbJobs) {
+        // Skip if no original_link
+        if (!dbJob.original_link) {
+          console.log(`⚠️ Skipping job without original_link: ${dbJob.job_title}`);
+          continue;
+        }
+        
+        if (!listedJobUrls.has(dbJob.original_link)) {
+          // Job not in listing anymore - mark as inactive
+          console.log(`⚠️ No longer listed: ${dbJob.job_title} at ${dbJob.company_name}`);
+          
+          if (!this.config.dryRun) {
+            await Job.findByIdAndUpdate(dbJob._id, {
+              is_active: false,
+              last_checked_at: new Date(),
+            });
+          }
+          markedInactive++;
+        }
+      }
+      
+      console.log(`✓ Marked ${markedInactive} jobs as inactive (not deleted - preserved for history)`);
+      
+    } catch (error) {
+      console.error('⚠️ Error marking inactive jobs:', error);
     }
   }
 
@@ -403,131 +496,6 @@ ${html}
     
     // If no clear indicators, assume still available
     return true;
-  }
-
-  /**
-   * Verify existing jobs and remove if no longer available or no vacancies
-   * Checks all jobs periodically to keep database clean
-   */
-  private async verifyOldJobs(): Promise<void> {
-    try {
-      console.log('\n📋 Verifying existing jobs in database...');
-      
-      // Calculate 7 days ago for regular checks
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      
-      // Find jobs that haven't been checked or were checked >7 days ago
-      const jobsToCheck = await Job.find({
-        $or: [
-          { last_checked_at: null },
-          { last_checked_at: { $lt: sevenDaysAgo } }
-        ]
-      }).limit(100); // Process max 100 jobs per verification run
-      
-      console.log(`📊 Found ${jobsToCheck.length} jobs to verify`);
-      
-      let updated = 0;
-      let removed = 0;
-      let unchanged = 0;
-      
-      for (const job of jobsToCheck) {
-        try {
-          // Skip if job doesn't have original_link
-          if (!job.original_link) {
-            console.log(`⚠️  Job missing original_link: ${job._id} - removing from DB`);
-            if (!this.config.dryRun) {
-              await Job.findByIdAndDelete(job._id);
-            }
-            removed++;
-            continue;
-          }
-          
-          console.log(`🔍 Checking: ${job.job_title} at ${job.company_name}`);
-          
-          // Try to scrape the job URL
-          const html = await this.scraper.scrapeJobPage(job.original_link);
-          
-          if (!html) {
-            // URL not working - delete job from database
-            console.log(`🗑️  Job URL not accessible - deleting: ${job.job_title}`);
-            if (!this.config.dryRun) {
-              await Job.findByIdAndDelete(job._id);
-            }
-            removed++;
-            continue;
-          }
-          
-          // Check if job still has vacancies
-          if (!this.hasVacancies(html)) {
-            console.log(`❌ No vacancies available - deleting: ${job.job_title}`);
-            if (!this.config.dryRun) {
-              await Job.findByIdAndDelete(job._id);
-            }
-            removed++;
-            continue;
-          }
-          
-          // Job still available with vacancies - check for changes
-          const cleanedHtml = this.scraper.cleanHTML(html);
-          const aiJobData = await this.analyzeWithGemini(cleanedHtml, job.original_link);
-          
-          if (aiJobData) {
-            // Compare key fields to detect changes
-            const hasChanges = this.hasJobChanges(job, aiJobData);
-            
-            if (hasChanges) {
-              console.log(`✏️  Updating changed job: ${job.job_title}`);
-              if (!this.config.dryRun) {
-                // Update with new data
-                await Job.findByIdAndUpdate(job._id, {
-                  ...aiJobData,
-                  last_checked_at: new Date(),
-                  is_active: true
-                });
-              }
-              updated++;
-            } else {
-              console.log(`✓ Job unchanged: ${job.job_title}`);
-              if (!this.config.dryRun) {
-                // Update last_checked_at only
-                await Job.findByIdAndUpdate(job._id, {
-                  last_checked_at: new Date(),
-                  is_active: true
-                });
-              }
-              unchanged++;
-            }
-          } else {
-            // Failed to analyze but page is accessible - keep the job
-            console.log(`⚠️  Analysis failed but job still exists: ${job.job_title}`);
-            if (!this.config.dryRun) {
-              await Job.findByIdAndUpdate(job._id, {
-                last_checked_at: new Date()
-              });
-            }
-            unchanged++;
-          }
-          
-          // Add delay between verification checks to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-        } catch (error) {
-          console.error(`⚠️  Error verifying job ${job._id}: ${error}`);
-          // Update last_checked_at even on error to avoid re-checking too soon
-          if (!this.config.dryRun) {
-            await Job.findByIdAndUpdate(job._id, {
-              last_checked_at: new Date()
-            });
-          }
-        }
-      }
-      
-      console.log(`✓ Verification complete: ${updated} updated, ${unchanged} unchanged, ${removed} deleted`);
-    } catch (error) {
-      console.error('⚠️  Job verification failed:', error);
-      // Don't stop mining if verification fails
-    }
   }
 
   /**

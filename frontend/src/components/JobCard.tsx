@@ -1,16 +1,31 @@
+import { Link } from 'react-router-dom';
 import type { IJob } from '../types';
 
 interface JobCardProps {
   job: IJob;
-  onClick: () => void;
 }
 
-export default function JobCard({ job, onClick }: JobCardProps) {
+export default function JobCard({ job }: JobCardProps) {
+  const isInactive = job.is_active === false;
+  
   return (
-    <div
-      onClick={onClick}
-      className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow cursor-pointer border border-gray-200"
+    <Link
+      to={`/job/${job._id}`}
+      className={`block bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow cursor-pointer border-2 ${
+        isInactive 
+          ? 'border-red-300 opacity-60 bg-gray-50' 
+          : 'border-gray-200'
+      }`}
     >
+      {/* Inactive Badge */}
+      {isInactive && (
+        <div className="mb-3">
+          <span className="inline-block bg-red-500 text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide">
+            ⚠️ Not Available
+          </span>
+        </div>
+      )}
+      
       {/* Header */}
       <div className="mb-4">
         <h3 className="text-xl font-bold text-gray-900 mb-2">
@@ -50,10 +65,10 @@ export default function JobCard({ job, onClick }: JobCardProps) {
       </div>
 
       {/* Salary */}
-      {job.salary?.average && (
+      {job.salary?.firstYearSalary && (
         <div className="mb-3">
           <span className="inline-block bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">
-            💰 ~{job.salary.average} {job.salary.currency}/month
+            💰 {job.salary.firstYearSalary} {job.salary.currency}/month (1st year)
           </span>
         </div>
       )}
@@ -73,6 +88,11 @@ export default function JobCard({ job, onClick }: JobCardProps) {
         {job.education_required && (
           <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-semibold">
             {job.education_required}
+          </span>
+        )}
+        {job.vacancy_count && job.vacancy_count > 1 && (
+          <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-semibold">
+            {job.vacancy_count} Positions
           </span>
         )}
       </div>
@@ -111,6 +131,6 @@ export default function JobCard({ job, onClick }: JobCardProps) {
           Start: {new Date(job.start_date).toLocaleDateString('de-DE')}
         </div>
       )}
-    </div>
+    </Link>
   );
 }

@@ -292,6 +292,246 @@ export class JobScraper {
   }
   
   /**
+   * Get all jobs from listing page with basic info (link, title, company, vacancies)
+   * Returns array of job objects for efficient checking
+   */
+  async getAllJobsFromListing(): Promise<Array<{ url: string; title: string; company: string; vacancyCount: number | null }>> {
+    let page: Page | null = null;
+    
+    try {
+      const browser = await this.initBrowser();
+      page = await browser.newPage();
+      await this.setupPage(page);
+      
+      const baseUrl = 'https://www.ausbildung.de';
+      const listingUrl = `${baseUrl}/suche/?search=Fachinformatiker%2Fin+für+Anwendungsentwicklung%7C`;
+      
+      console.log('\n🌐 Scraping ALL jobs from listing page...');
+      await page.goto(listingUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 60000,
+      });
+      
+      // Initial wait for page load
+      await randomDelay(4000, 5000);
+      
+      // Load ALL jobs by clicking "Load more" button
+      // Strategy: Scroll -> Wait 10-15s -> Scroll until button appears -> Click -> Repeat
+      let previousJobCount = 0;
+      let loadMoreAttempts = 0;
+      const maxAttempts = 1000; // High limit to handle 3000-10000 jobs
+      let consecutiveFailures = 0;
+      const maxConsecutiveFailures = 5; // Stop if button not found 5 times in a row
+      
+      console.log('📜 Loading all jobs (clicking "Mehr Ergebnisse laden" button)...');
+      console.log('   Strategy: Scroll -> Wait 10-15s -> Find button -> Click -> Repeat');
+      
+      while (loadMoreAttempts < maxAttempts && consecutiveFailures < maxConsecutiveFailures) {
+        // Count current jobs
+        const currentJobCount = await page.evaluate(() => {
+          return document.querySelectorAll('a[href*="/stellen/"]').length;
+        });
+        
+        if (currentJobCount > previousJobCount) {
+          console.log(`  ✓ Loaded ${currentJobCount} jobs...`);
+          previousJobCount = currentJobCount;
+          consecutiveFailures = 0; // Reset failure counter on successful load
+        }
+        
+        // STEP 1: Scroll to bottom multiple times
+        console.log(`  📜 Scrolling to trigger lazy loading...`);
+        for (let i = 0; i < 3; i++) {
+          await page.evaluate(() => {
+            window.scrollTo(0, document.body.scrollHeight);
+          });
+          await randomDelay(1000, 2000);
+        }
+        
+        // STEP 2: Wait 10-15 seconds for content to load
+        console.log(`  ⏳ Waiting 10-15 seconds for content to load...`);
+        await randomDelay(10000, 15000);
+        
+        // STEP 3: Scroll again to ensure button is visible
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await randomDelay(1000, 2000);
+        
+        // STEP 4: Try to find and click the "Mehr Ergebnisse laden" button
+        const buttonClicked = await page.evaluate(() => {
+          // Look for the "Load more results" button
+          const buttons = Array.from(document.querySelectorAll('button'));
+          const loadMoreButton = buttons.find(btn => 
+            btn.textContent?.includes('Mehr Ergebnisse laden') ||
+            btn.textContent?.includes('Mehr Ergebnisse') ||
+            btn.textContent?.includes('Load more') ||
+            btn.classList.contains('Button-module__t8uWSa__button')
+          );
+          
+          if (loadMoreButton && loadMoreButton instanceof HTMLButtonElement) {
+            // Check if button is visible and not disabled
+            const style = window.getComputedStyle(loadMoreButton);
+            const rect = loadMoreButton.getBoundingClientRect();
+            if (style.display !== 'none' && 
+                !loadMoreButton.disabled && 
+                rect.height > 0 && 
+                rect.width > 0) {
+              loadMoreButton.click();
+              return true;
+            }
+          }
+          
+          return false;
+        });
+        
+        if (buttonClicked) {
+          console.log(`  🔘 Clicked "Mehr Ergebnisse laden" button (attempt ${loadMoreAttempts + 1})`);
+          loadMoreAttempts++;
+          
+          // STEP 5: Scroll again after clicking to trigger loading
+          console.log(`  📜 Scrolling after button click...`);
+          for (let i = 0; i < 2; i++) {
+            await page.evaluate(() => {
+              window.scrollTo(0, document.body.scrollHeight);
+            });
+            await randomDelay(1000, 2000);
+          }
+          
+          // Wait a bit for new content to start loading
+          await randomDelay(3000, 5000);
+        } else {
+          consecutiveFailures++;
+          console.log(`  ⚠️  "Load more" button not found (attempt ${consecutiveFailures}/${maxConsecutiveFailures})`);
+          
+          if (consecutiveFailures >= maxConsecutiveFailures) {
+            console.log(`  ✓ No more "Load more" button found after ${maxConsecutiveFailures} attempts. All jobs loaded (${currentJobCount} total)`);
+            break;
+          }
+          
+          // Wait a bit before trying again
+          await randomDelay(2000, 3000);
+        }
+      }
+      
+      if (loadMoreAttempts >= maxAttempts) {
+        console.log(`  ⚠️  Reached maximum attempts (${maxAttempts}). Stopped loading.`);
+      }
+      
+      // Final job count
+      const finalJobCount = await page.evaluate(() => {
+        return document.querySelectorAll('a[href*="/stellen/"]').length;
+      });
+      console.log(`\n  📊 Final count: ${finalJobCount} job listings found`);
+      
+      
+      // Extract all job data
+      console.log('📊 Extracting job details...');
+      const jobs = await page.evaluate((base: string) => {
+        const jobData: Array<{ url: string; title: string; company: string; vacancyCount: number | null }> = [];
+        const seenUrls = new Set<string>();
+        
+        // Find all job cards
+        const jobCards = document.querySelectorAll('a[href*="/stellen/"]');
+        
+        jobCards.forEach((card) => {
+          const href = (card as HTMLAnchorElement).getAttribute('href');
+          if (!href || !href.includes('/stellen/')) return;
+          
+          // Build full URL
+          let url = href;
+          if (!url.startsWith('http')) {
+            url = base + (href.startsWith('/') ? href : '/' + href);
+          }
+          
+          // Skip duplicates
+          if (seenUrls.has(url)) return;
+          seenUrls.add(url);
+          
+          // Find the job card container by traversing up
+          let container: Element | null = card;
+          let traverseDepth = 0;
+          let title = '';
+          let company = '';
+          let vacancyCount: number | null = null;
+          
+          // Look for parent container with job info
+          while (container && traverseDepth < 10) {
+            // Try to find title
+            if (!title) {
+              const titleEl = container.querySelector('h2, h3, [class*="title"]');
+              if (titleEl) title = titleEl.textContent?.trim() || '';
+            }
+            
+            // Try to find company
+            if (!company) {
+              const companyEl = container.querySelector('[class*="company"], [class*="corporation"]');
+              if (companyEl) company = companyEl.textContent?.trim() || '';
+            }
+            
+            // Try to find vacancy count
+            if (vacancyCount === null) {
+              const vacancyEl = container.querySelector('[data-testid="jp-vacancies"]');
+              if (vacancyEl) {
+                const text = vacancyEl.textContent || '';
+                const match = text.match(/(\d+)/);
+                if (match && match[1]) {
+                  vacancyCount = parseInt(match[1], 10);
+                }
+              }
+            }
+            
+            // Stop if we found everything or went too far
+            if (title && company) break;
+            if (container.tagName === 'BODY' || container.tagName === 'MAIN') break;
+            
+            container = container.parentElement;
+            traverseDepth++;
+          }
+          
+          // Extract from card text if not found
+          if (!title || !company) {
+            const cardText = (card as HTMLElement).textContent || '';
+            if (!title) {
+              // Try to extract first meaningful line as title
+              const lines = cardText.split('\n').map(l => l.trim()).filter(l => l.length > 10);
+              if (lines.length > 0) title = lines[0];
+            }
+            if (!company && cardText.includes('bei ')) {
+              const match = cardText.match(/bei\s+([^\n]+)/i);
+              if (match) company = match[1].trim();
+            }
+          }
+          
+          jobData.push({
+            url,
+            title: title || 'Unknown Position',
+            company: company || 'Unknown Company',
+            vacancyCount: vacancyCount || 1, // Default to 1 if not found
+          });
+        });
+        
+        return jobData;
+      }, baseUrl);
+      
+      await page.close();
+      
+      console.log(`✅ Scraped ${jobs.length} jobs from listing page\n`);
+      return jobs;
+      
+    } catch (error) {
+      console.error('❌ Error scraping all jobs:', error);
+      if (page) {
+        try {
+          await page.close();
+        } catch (e) {
+          // Ignore
+        }
+      }
+      return [];
+    }
+  }
+
+  /**
    * Scrape ausbildung.de for job listings from page HTML
    */
   private async scrapeAusbildungDe(page: Page, baseUrl: string): Promise<string[]> {
@@ -458,6 +698,200 @@ export class JobScraper {
     return await checkFn(url);
   }
   
+  /**
+   * Check if a job URL is still present on the listing page and get its vacancy count
+   * Returns { isAvailable: boolean, vacancyCount: number | null }
+   */
+  async checkJobOnListingPage(jobUrl: string): Promise<{ isAvailable: boolean; vacancyCount: number | null }> {
+    let page: Page | null = null;
+    
+    try {
+      const browser = await this.initBrowser();
+      page = await browser.newPage();
+      await this.setupPage(page);
+      
+      // Extract slug from job URL (e.g., "ausbildung-fachinformatiker-...")
+      const slugMatch = jobUrl.match(/\/stellen\/([^\/]+)\/?/);
+      if (!slugMatch || !slugMatch[1]) {
+        console.warn(`⚠️ Could not extract slug from URL: ${jobUrl}`);
+        return { isAvailable: false, vacancyCount: null };
+      }
+      
+      const fullSlug = slugMatch[1];
+      
+      // Extract the UUID from slug (last part after last hyphen before any query params)
+      // e.g., "auszubildende-fachinformatikerin-...-e2bd7e06-99df-429c-ab50-1326bba8d9c5"
+      const uuidMatch = fullSlug.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i);
+      const uuid = uuidMatch ? uuidMatch[1] : null;
+      
+      // Go to the listing page for Anwendungsentwicklung
+      const listingUrl = 'https://www.ausbildung.de/suche/?search=Fachinformatiker%2Fin+für+Anwendungsentwicklung%7C';
+      console.log(`🔍 Checking listing page for job (UUID: ${uuid || 'none'})...`);
+      
+      await page.goto(listingUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 50000,
+      });
+      
+      // Wait for initial content to load
+      await randomDelay(3000, 4000);
+      
+      // Scroll to load more jobs (job might be further down)
+      let found = false;
+      let vacancyCount: number | null = null;
+      let scrollAttempts = 0;
+      const maxScrollAttempts = 30; // Increase to 30 scrolls to check more jobs
+      let previousJobCount = 0;
+      let noNewJobsCount = 0;
+      
+      while (!found && scrollAttempts < maxScrollAttempts) {
+        // Check if job exists on current visible page
+        const result = await page.evaluate((searchUuid: string | null, searchFullSlug: string) => {
+          // Look for job card with matching URL
+          const links = Array.from(document.querySelectorAll('a[href*="/stellen/"]'));
+          
+          // Try multiple matching strategies
+          for (const link of links) {
+            const href = (link as HTMLAnchorElement).getAttribute('href');
+            if (!href) continue;
+            
+            // Strategy 1: Match by UUID (most reliable)
+            if (searchUuid && href.includes(searchUuid)) {
+              // Found by UUID! Now look for vacancy count
+              let element: Element | null = link;
+              
+              // Traverse up to find the job card container
+              let traverseDepth = 0;
+              while (element && element.parentElement && traverseDepth < 10) {
+                element = element.parentElement;
+                traverseDepth++;
+                
+                // Look for vacancy count span within this container
+                const vacancySpan = element.querySelector('[data-testid="jp-vacancies"]');
+                if (vacancySpan) {
+                  const text = vacancySpan.textContent || '';
+                  // Extract number from text like "1 Platz" or "2 Plätze"
+                  const match = text.match(/(\d+)/);
+                  if (match && match[1]) {
+                    return {
+                      found: true,
+                      vacancyCount: parseInt(match[1], 10),
+                      matchedBy: 'uuid'
+                    };
+                  }
+                  return { found: true, vacancyCount: 1, matchedBy: 'uuid-no-count' };
+                }
+                
+                // Stop if we've gone too far up
+                if (element.tagName === 'BODY' || element.tagName === 'MAIN') {
+                  break;
+                }
+              }
+              
+              // Found the link but no vacancy count - assume 1
+              return { found: true, vacancyCount: 1, matchedBy: 'uuid-fallback' };
+            }
+            
+            // Strategy 2: Match by significant part of slug (fallback)
+            // Extract the meaningful part before the UUID
+            const slugWithoutUuid = searchFullSlug.replace(/-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i, '');
+            if (slugWithoutUuid.length > 20 && href.includes(slugWithoutUuid)) {
+              // Found by partial slug match
+              let element: Element | null = link;
+              let traverseDepth = 0;
+              
+              while (element && element.parentElement && traverseDepth < 10) {
+                element = element.parentElement;
+                traverseDepth++;
+                
+                const vacancySpan = element.querySelector('[data-testid="jp-vacancies"]');
+                if (vacancySpan) {
+                  const text = vacancySpan.textContent || '';
+                  const match = text.match(/(\d+)/);
+                  if (match && match[1]) {
+                    return {
+                      found: true,
+                      vacancyCount: parseInt(match[1], 10),
+                      matchedBy: 'partial-slug'
+                    };
+                  }
+                  return { found: true, vacancyCount: 1, matchedBy: 'partial-slug-no-count' };
+                }
+                
+                if (element.tagName === 'BODY' || element.tagName === 'MAIN') {
+                  break;
+                }
+              }
+              
+              return { found: true, vacancyCount: 1, matchedBy: 'partial-slug-fallback' };
+            }
+          }
+          
+          return { found: false, vacancyCount: null, matchedBy: 'none', totalLinks: links.length };
+        }, uuid, fullSlug);
+        
+        if (result.found) {
+          found = true;
+          vacancyCount = result.vacancyCount;
+          console.log(`✓ Job found (matched by: ${(result as any).matchedBy})`);
+          break;
+        }
+        
+        // Count current jobs to detect if we're loading more
+        const currentJobCount = await page.evaluate(() => {
+          return document.querySelectorAll('a[href*="/stellen/"]').length;
+        });
+        
+        if (currentJobCount === previousJobCount) {
+          noNewJobsCount++;
+          // If no new jobs after 5 scrolls, likely at the end
+          if (noNewJobsCount >= 5) {
+            console.log(`⚠️ No new jobs loading after ${noNewJobsCount} scrolls, stopping search`);
+            break;
+          }
+        } else {
+          noNewJobsCount = 0;
+          previousJobCount = currentJobCount;
+        }
+        
+        // Scroll down to load more jobs
+        await page.evaluate(() => {
+          window.scrollBy(0, window.innerHeight);
+        });
+        
+        // Wait longer for lazy loading
+        await randomDelay(3000, 4000);
+        scrollAttempts++;
+        
+        if (scrollAttempts % 5 === 0) {
+          console.log(`  ... still searching (${currentJobCount} jobs loaded, scroll ${scrollAttempts}/${maxScrollAttempts})`);
+        }
+      }
+      
+      await page.close();
+      
+      if (found) {
+        console.log(`✓ Job found on listing page with ${vacancyCount || 1} vacancies`);
+      } else {
+        console.log(`✗ Job not found on listing page (checked ${previousJobCount} jobs over ${scrollAttempts} scrolls)`);
+      }
+      
+      return { isAvailable: found, vacancyCount };
+      
+    } catch (error) {
+      console.error(`❌ Error checking job on listing page:`, error);
+      if (page) {
+        try {
+          await page.close();
+        } catch (e) {
+          // Ignore
+        }
+      }
+      // Return false to indicate error (not confirmed unavailable)
+      return { isAvailable: false, vacancyCount: null };
+    }
+  }
+
   /**
    * Clean HTML to extract meaningful text
    * Removes scripts, styles, and unnecessary whitespace

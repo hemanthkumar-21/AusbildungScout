@@ -14,6 +14,7 @@ export interface JobFilterQuery {
   minSalary?: number;
   startDate?: string;
   educationLevel?: string;
+  minVacancies?: number;
   
   // New Filters
   tariffTypes?: TariffType[];      // Filter by multiple tariff types
@@ -21,6 +22,8 @@ export interface JobFilterQuery {
   rentSubsidy?: boolean;            // Filter for rent subsidy
   freeAccommodation?: boolean;      // Filter for free accommodation
   benefitTags?: string[];           // Filter by specific benefit tags
+  hideInactive?: boolean;           // Hide inactive/stale jobs
+  sortBy?: 'salary-high' | 'salary-low' | 'default';  // Sort order
   
   // Fuzzy Search
   searchTerm?: string;
@@ -36,6 +39,11 @@ export interface JobFilterQuery {
  */
 export function buildMongoDBFilter(query: JobFilterQuery) {
   const filter: any = {};
+  
+  // === OPTIONAL: Hide inactive jobs if requested ===
+  if (query.hideInactive === true) {
+    filter.is_active = true;
+  }
   
   // === PHASE 1: HARD CONSTRAINTS ===
   
@@ -56,12 +64,13 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
   
   // === PHASE 2: RANGE CONSTRAINTS ===
   
-  // Salary: Check firstYearSalary OR average (whichever is available)
+  // Salary: Filter based on first year salary only
+  // Also ensure the field exists when filtering or sorting by salary
   if (query.minSalary && query.minSalary > 0) {
-    filter.$or = [
-      { 'salary.firstYearSalary': { $gte: query.minSalary } },
-      { 'salary.average': { $gte: query.minSalary } }
-    ];
+    filter['salary.firstYearSalary'] = { $gte: query.minSalary, $exists: true, $ne: null };
+  } else if (query.sortBy === 'salary-high' || query.sortBy === 'salary-low') {
+    // When sorting by salary, only show jobs that have a salary
+    filter['salary.firstYearSalary'] = { $exists: true, $ne: null, $gt: 0 };
   }
   
   // Start Date: Must be >= user's desired start date
@@ -73,6 +82,11 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
   // Education: Exact match or lower requirement
   if (query.educationLevel) {
     filter.education_required = query.educationLevel;
+  }
+  
+  // Vacancy Count: Minimum number of open positions
+  if (query.minVacancies && query.minVacancies > 0) {
+    filter.vacancy_count = { $gte: query.minVacancies };
   }
   
   // Tariff Type: Filter by specific tariff agreements
@@ -127,10 +141,21 @@ export function getPaginationParams(
 /**
  * Build sort options for MongoDB query
  */
-export function buildSortOptions(searchTerm?: string): Record<string, 1 | -1> {
+export function buildSortOptions(searchTerm?: string, sortBy?: string): any {
   // If text search is used, sort by relevance score
   if (searchTerm) {
     return { score: { $meta: 'textScore' } };
+  }
+  
+  // Handle sorting options
+  if (sortBy === 'salary-high') {
+    // High to low: Sort by first year salary descending
+    return { 'salary.firstYearSalary': -1, posted_at: -1 };
+  }
+  
+  if (sortBy === 'salary-low') {
+    // Low to high: Sort by first year salary ascending
+    return { 'salary.firstYearSalary': 1, posted_at: -1 };
   }
   
   // Default: Sort by most recently posted first

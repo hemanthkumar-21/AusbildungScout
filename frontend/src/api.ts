@@ -30,6 +30,9 @@ export const jobsApi = {
     if (filters.rentSubsidy) params.append('rentSubsidy', String(filters.rentSubsidy));
     if (filters.freeAccommodation) params.append('freeAccommodation', String(filters.freeAccommodation));
     if (filters.benefitTags) params.append('benefitTags', filters.benefitTags);
+    if (filters.minVacancies) params.append('minVacancies', String(filters.minVacancies));
+    if (filters.hideInactive) params.append('hideInactive', String(filters.hideInactive));
+    if (filters.sortBy) params.append('sortBy', filters.sortBy);
     
     const response = await api.get<JobsResponse>(`/jobs?${params.toString()}`);
     return response.data;

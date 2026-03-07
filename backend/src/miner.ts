@@ -790,26 +790,50 @@ ${html}
       return normalized;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorObj = error instanceof Error && error.cause ? error.cause : error;
       
-      // Handle 429 Too Many Requests by rotating to next key
-      if (errorMessage.includes('429') || errorMessage.includes('quota') || errorMessage.includes('Too Many Requests')) {
-        console.warn(`⚠️  API Key ${this.currentKeyIndex + 1} rate limited`);
+      // Extract status code from error
+      let statusCode = 0;
+      try {
+        if (typeof errorObj === 'object' && errorObj !== null && 'code' in errorObj) {
+          statusCode = (errorObj as any).code;
+        } else if (errorMessage.includes('503') || errorMessage.includes('UNAVAILABLE')) {
+          statusCode = 503;
+        } else if (errorMessage.includes('429') || errorMessage.includes('too many') || errorMessage.includes('quota') || errorMessage.includes('rate')) {
+          statusCode = 429;
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+      
+      // Handle 429 and 503 errors by rotating to next key
+      if (statusCode === 429 || statusCode === 503 || 
+          errorMessage.includes('429') || 
+          errorMessage.includes('503') ||
+          errorMessage.includes('Too Many Requests') || 
+          errorMessage.includes('UNAVAILABLE') ||
+          errorMessage.includes('rate') || 
+          errorMessage.includes('quota')) {
         
-        // Mark current key as rate limited and rotate
-        const stats = this.keyStats.get(this.currentKeyIndex);
-        if (stats) {
-          stats.callCount = 15; // Mark as maxed out
+        if (statusCode === 429) {
+          console.warn(`⚠️  API Key ${this.currentKeyIndex + 1} rate limited (429)`);
+          const stats = this.keyStats.get(this.currentKeyIndex);
+          if (stats) {
+            stats.callCount = 15; // Mark as maxed out
+          }
+        } else if (statusCode === 503) {
+          console.warn(`⚠️  API Key ${this.currentKeyIndex + 1} service unavailable (503), trying next key...`);
         }
         
         // Try next key if available
         if (this.geminiApiKeys.length > 1 && retryCount < this.geminiApiKeys.length) {
           this.rotateToNextKey();
           console.log(`🔄 Retrying with next API key (attempt ${retryCount + 1}/${this.geminiApiKeys.length})...`);
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Brief pause before retry
           return this.analyzeWithGemini(html, jobUrl, retryCount + 1);
         } else if (retryCount < this.geminiApiKeys.length + 2) {
           // All keys tried, wait and retry with first key
-          const backoffMs = 30000; // 30 seconds
+          const backoffMs = 60000; // 60 seconds
           console.warn(`⚠️  All keys exhausted. Waiting ${backoffMs / 1000}s before retry...`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
           this.currentKeyIndex = 0; // Reset to first key

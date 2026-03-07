@@ -1,9 +1,9 @@
 /**
  * API Filtering Logic
- * Implements the three-phase filtering pipeline
+ * Implements the three-phase filtering pipeline with enhanced salary and start date filters
  */
 
-import { GermanLevelRank, GermanLevel, TariffType } from '@/types';
+import { GermanLevelRank, GermanLevel, TariffType, StartDateType } from '@/types';
 
 export interface JobFilterQuery {
   // Hard Constraints
@@ -12,18 +12,32 @@ export interface JobFilterQuery {
   
   // Range Constraints
   minSalary?: number;
+  maxSalary?: number;                 // NEW: Upper salary limit
+  salaryAboveAverage?: boolean;        // NEW: Filter salaries above market average
+  
   startDate?: string;
+  startDateType?: StartDateType[];     // NEW: Filter by fixed/flexible/negotiable
+  
   educationLevel?: string;
   minVacancies?: number;
   
+  // Duration Filters - NEW
+  maxDurationMonths?: number;          // Filter for shorter apprenticeships
+  minDurationMonths?: number;          // Filter for longer apprenticeships
+  
   // New Filters
-  tariffTypes?: TariffType[];      // Filter by multiple tariff types
-  relocationSupport?: boolean;      // Filter for relocation support offered
-  rentSubsidy?: boolean;            // Filter for rent subsidy
-  freeAccommodation?: boolean;      // Filter for free accommodation
-  benefitTags?: string[];           // Filter by specific benefit tags
-  hideInactive?: boolean;           // Hide inactive/stale jobs
-  sortBy?: 'salary-high' | 'salary-low' | 'default';  // Sort order
+  tariffTypes?: TariffType[];          // Filter by multiple tariff types
+  relocationSupport?: boolean;         // Filter for relocation support offered
+  rentSubsidy?: boolean;               // Filter for rent subsidy
+  freeAccommodation?: boolean;         // Filter for free accommodation
+  benefitTags?: string[];              // Filter by specific benefit tags
+  
+  // Minijob Filters - NEW
+  minijobAccepted?: boolean;           // Filter for minijob acceptance
+  minMinijobAcceptanceRate?: number;   // NEW: Minimum acceptance rate (0-100%)
+  
+  hideInactive?: boolean;              // Hide inactive/stale jobs
+  sortBy?: 'salary-high' | 'salary-low' | 'duration-short' | 'default';  // NEW: duration sorting
   
   // Fuzzy Search
   searchTerm?: string;
@@ -31,6 +45,15 @@ export interface JobFilterQuery {
   // Pagination
   page?: number;
   limit?: number;
+}
+
+/**
+ * Get market average salary for salary comparison
+ * Based on current tariff data
+ */
+function getMarketAverageSalary(): number {
+  // Average of all major tariffs (rough estimate)
+  return 1050; // EUR/month for 1st year
 }
 
 /**
@@ -64,19 +87,41 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
   
   // === PHASE 2: RANGE CONSTRAINTS ===
   
-  // Salary: Filter based on first year salary only
-  // Also ensure the field exists when filtering or sorting by salary
-  if (query.minSalary && query.minSalary > 0) {
-    filter['salary.firstYearSalary'] = { $gte: query.minSalary, $exists: true, $ne: null };
+  // Salary Filters: Multiple options
+  const hasSalaryFilter = query.minSalary || query.maxSalary || query.salaryAboveAverage;
+  
+  if (hasSalaryFilter) {
+    filter['salary.firstYearSalary'] = { $exists: true, $ne: null, $gt: 0 };
+    
+    // Minimum salary
+    if (query.minSalary && query.minSalary > 0) {
+      filter['salary.firstYearSalary'].$gte = query.minSalary;
+    }
+    
+    // Maximum salary
+    if (query.maxSalary && query.maxSalary > 0) {
+      filter['salary.firstYearSalary'].$lte = query.maxSalary;
+    }
+    
+    // Salary above market average
+    if (query.salaryAboveAverage === true) {
+      const avgSalary = getMarketAverageSalary();
+      filter['salary.firstYearSalary'].$gte = avgSalary;
+    }
   } else if (query.sortBy === 'salary-high' || query.sortBy === 'salary-low') {
     // When sorting by salary, only show jobs that have a salary
     filter['salary.firstYearSalary'] = { $exists: true, $ne: null, $gt: 0 };
   }
   
-  // Start Date: Must be >= user's desired start date
+  // Start Date Filters
   if (query.startDate) {
     const desiredStart = new Date(query.startDate);
     filter.start_date = { $gte: desiredStart };
+  }
+  
+  // Start Date Type Filter (flexible/fixed/negotiable)
+  if (query.startDateType && query.startDateType.length > 0) {
+    filter.start_date_type = { $in: query.startDateType };
   }
   
   // Education: Exact match or lower requirement
@@ -87,6 +132,19 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
   // Vacancy Count: Minimum number of open positions
   if (query.minVacancies && query.minVacancies > 0) {
     filter.vacancy_count = { $gte: query.minVacancies };
+  }
+  
+  // Duration Filters (NEW)
+  if (query.minDurationMonths && query.minDurationMonths > 0) {
+    filter.duration_months = { $gte: query.minDurationMonths };
+  }
+  
+  if (query.maxDurationMonths && query.maxDurationMonths > 0) {
+    if (filter.duration_months) {
+      filter.duration_months.$lte = query.maxDurationMonths;
+    } else {
+      filter.duration_months = { $lte: query.maxDurationMonths };
+    }
   }
   
   // Tariff Type: Filter by specific tariff agreements
@@ -110,6 +168,15 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
   // Benefit Tags: Jobs must have ALL specified benefit tags
   if (query.benefitTags && query.benefitTags.length > 0) {
     filter.benefits_tags = { $all: query.benefitTags };
+  }
+  
+  // Minijob Filters (NEW)
+  if (query.minijobAccepted === true) {
+    filter.minijob_acceptance = true;
+  }
+  
+  if (query.minMinijobAcceptanceRate && query.minMinijobAcceptanceRate > 0) {
+    filter.minijob_acceptance_rate = { $gte: query.minMinijobAcceptanceRate };
   }
   
   // === PHASE 3: FUZZY SEARCH ===
@@ -156,6 +223,11 @@ export function buildSortOptions(searchTerm?: string, sortBy?: string): any {
   if (sortBy === 'salary-low') {
     // Low to high: Sort by first year salary ascending
     return { 'salary.firstYearSalary': 1, posted_at: -1 };
+  }
+  
+  if (sortBy === 'duration-short') {
+    // Shorter apprenticeships first (useful for career changers)
+    return { duration_months: 1, posted_at: -1 };
   }
   
   // Default: Sort by most recently posted first

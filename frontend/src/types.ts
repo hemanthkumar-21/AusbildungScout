@@ -38,6 +38,14 @@ export const TariffType = {
 
 export type TariffType = typeof TariffType[keyof typeof TariffType];
 
+export const StartDateType = {
+  FIXED: 'fixed',
+  FLEXIBLE: 'flexible',
+  NEGOTIABLE: 'negotiable',
+} as const;
+
+export type StartDateType = typeof StartDateType[keyof typeof StartDateType];
+
 export interface ILocation {
   city: string;
   zip_code?: string;
@@ -50,6 +58,7 @@ export interface ISalary {
   thirdYearSalary?: number;
   average?: number;
   currency: string;
+  source?: 'scraped' | 'description_parsed' | 'company_website' | 'tariff_standard' | 'unknown';
 }
 
 export interface IContact {
@@ -75,6 +84,7 @@ export interface IJob {
   company_name: string;
   locations: ILocation[];
   start_date?: string;
+  start_date_type?: StartDateType;
   duration_months?: number;
   application_deadline?: string;
   available_positions?: number;
@@ -92,6 +102,8 @@ export interface IJob {
   benefits_tags?: string[];
   benefits_verified?: boolean;
   benefits_last_updated?: string;
+  minijob_acceptance?: boolean;
+  minijob_acceptance_rate?: number;
   description_full?: string;
   description_snippet?: string;
   original_link?: string;
@@ -106,20 +118,27 @@ export interface JobFilterQuery {
   germanLevel?: GermanLevel;
   visaNeed?: boolean;
   minSalary?: number;
+  maxSalary?: number;
+  salaryAboveAverage?: boolean;
   startDate?: string;
+  startDateType?: string;
   educationLevel?: string;
+  minDurationMonths?: number;
+  maxDurationMonths?: number;
   search?: string;
   page?: number;
   limit?: number;
-  // New filters
+  // Filters
   tariffTypes?: string;
   relocationSupport?: boolean;
   rentSubsidy?: boolean;
   freeAccommodation?: boolean;
   benefitTags?: string;
   minVacancies?: number;
+  minijobAccepted?: boolean;
+  minMinijobAcceptanceRate?: number;
   hideInactive?: boolean;
-  sortBy?: 'salary-high' | 'salary-low' | 'default';
+  sortBy?: 'salary-high' | 'salary-low' | 'duration-short' | 'default';
 }
 
 export interface PaginationInfo {

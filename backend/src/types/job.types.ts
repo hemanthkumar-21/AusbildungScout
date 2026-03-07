@@ -45,6 +45,13 @@ export enum TariffType {
   OTHER = 'Other',                   // Other tariff agreements
 }
 
+// Start Date Types - for flexibility filtering
+export enum StartDateType {
+  FIXED = 'fixed',                    // Concrete date specified
+  FLEXIBLE = 'flexible',              // "nach Absprache", "by arrangement", etc.
+  NEGOTIABLE = 'negotiable',          // Can be discussed/negotiated
+}
+
 // --- Interfaces ---
 export interface ILocation {
   city: string;
@@ -58,6 +65,7 @@ export interface ISalary {
   thirdYearSalary?: number;
   average?: number; // Calculated field for easier filtering (e.g., > €1000)
   currency: string;
+  source?: 'scraped' | 'company_website' | 'tariff_standard' | 'unknown'; // Track data source
 }
 
 export interface IContact {
@@ -86,6 +94,7 @@ export interface IJob extends Document {
   
   // Dates & Logistics
   start_date?: Date; // e.g., 2026-09-01
+  start_date_type?: StartDateType; // fixed, flexible, or negotiable
   duration_months?: number; // e.g., 36
   application_deadline?: Date;
   available_positions?: number; // e.g., 2
@@ -109,6 +118,10 @@ export interface IJob extends Document {
   benefits_tags?: string[]; // Standardized tags: ["30_DAYS_VACATION", "LAPTOP", "CANTEEN", "13TH_SALARY"]
   benefits_verified?: boolean; // Whether benefits were verified from official company source
   benefits_last_updated?: Date; // Last time benefits were updated from official source
+  
+  // Employment Options
+  minijob_acceptance?: boolean; // Whether minijob (450€) is accepted as alternative
+  minijob_acceptance_rate?: number; // Percentage 0-100 of positions that accept minijob
   
   // Meta
   description_full?: string; // The full raw text for search

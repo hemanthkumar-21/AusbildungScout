@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { JobFilterQuery } from '../types';
-import { GermanLevel, EducationLevel, TariffType } from '../types';
+import { GermanLevel, EducationLevel, TariffType, StartDateType } from '../types';
 
 interface FilterSidebarProps {
   filters: JobFilterQuery;
@@ -68,6 +68,7 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
             <option value="default">Recently Posted</option>
             <option value="salary-high">Salary: High to Low</option>
             <option value="salary-low">Salary: Low to High</option>
+            <option value="duration-short">Duration: Shortest First</option>
           </select>
         </div>
 
@@ -125,6 +126,40 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
           />
         </div>
 
+        {/* Maximum Salary */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Max. Salary (€/month)
+          </label>
+          <input
+            type="number"
+            value={filters.maxSalary || ''}
+            onChange={(e) => handleInputChange('maxSalary', e.target.value ? parseInt(e.target.value) : undefined)}
+            placeholder="e.g., 1500"
+            min="0"
+            step="100"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+
+        {/* Salary Above Average */}
+        <div>
+          <label className="flex items-center space-x-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filters.salaryAboveAverage || false}
+              onChange={(e) => handleInputChange('salaryAboveAverage', e.target.checked)}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">
+              Above Market Average
+            </span>
+          </label>
+          <p className="text-xs text-gray-500 ml-6 mt-1">
+            Show only higher paying positions
+          </p>
+        </div>
+
         {/* Minimum Vacancies */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -172,6 +207,48 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
           />
         </div>
 
+        {/* Start Date Type */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Start Date Flexibility
+          </label>
+          <div className="space-y-2">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.startDateType?.includes('fixed') || false}
+                onChange={(e) => {
+                  const types = filters.startDateType?.split(',') || [];
+                  const filtered = types.filter(t => t !== 'fixed');
+                  if (e.target.checked) {
+                    filtered.push('fixed');
+                  }
+                  handleInputChange('startDateType', filtered.length > 0 ? filtered.join(',') : undefined);
+                }}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Fixed Dates</span>
+            </label>
+            
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.startDateType?.includes('flexible') || false}
+                onChange={(e) => {
+                  const types = filters.startDateType?.split(',') || [];
+                  const filtered = types.filter(t => t !== 'flexible');
+                  if (e.target.checked) {
+                    filtered.push('flexible');
+                  }
+                  handleInputChange('startDateType', filtered.length > 0 ? filtered.join(',') : undefined);
+                }}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Flexible/Negotiable</span>
+            </label>
+          </div>
+        </div>
+
         {/* Visa Sponsorship */}
         <div>
           <label className="flex items-center space-x-2 cursor-pointer">
@@ -185,6 +262,77 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
               Visa Sponsorship Required
             </span>
           </label>
+        </div>
+
+        {/* Apprenticeship Duration */}
+        <div className="border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Apprenticeship Duration</h3>
+          
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Min. Duration (months)
+              </label>
+              <input
+                type="number"
+                value={filters.minDurationMonths || ''}
+                onChange={(e) => handleInputChange('minDurationMonths', e.target.value ? parseInt(e.target.value) : undefined)}
+                placeholder="e.g., 24"
+                min="1"
+                step="1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Max. Duration (months)
+              </label>
+              <input
+                type="number"
+                value={filters.maxDurationMonths || ''}
+                onChange={(e) => handleInputChange('maxDurationMonths', e.target.value ? parseInt(e.target.value) : undefined)}
+                placeholder="e.g., 36"
+                min="1"
+                step="1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Minijob Options */}
+        <div className="border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Employment Options</h3>
+          
+          <div className="space-y-3">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.minijobAccepted || false}
+                onChange={(e) => handleInputChange('minijobAccepted', e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Accepts Minijob (450€)</span>
+            </label>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Min. Minijob Acceptance Rate (%)
+              </label>
+              <input
+                type="number"
+                value={filters.minMinijobAcceptanceRate || ''}
+                onChange={(e) => handleInputChange('minMinijobAcceptanceRate', e.target.value ? parseInt(e.target.value) : undefined)}
+                placeholder="e.g., 80"
+                min="0"
+                max="100"
+                step="5"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Position must have at least this % accepting minijob</p>
+            </div>
+          </div>
         </div>
 
         {/* Tariff Type */}

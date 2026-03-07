@@ -18,7 +18,7 @@ const defaultConfig: ScraperConfig = {
   minDelayMs: 2000,
   maxDelayMs: 5000,
   maxRetries: 3,
-  headless: true,
+  headless: false,
 };
 
 /**
@@ -129,6 +129,8 @@ export class JobScraper {
     try {
       this.browser = await puppeteer.launch({
         headless: this.config.headless,
+        slowMo: 250,
+        devtools: true,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -167,6 +169,168 @@ export class JobScraper {
       'Upgrade-Insecure-Requests': '1',
     });
   }
+
+  /**
+   * Handle Cookiebot consent modal that appears on ausbildung.de
+   * Either accepts all cookies or dismisses the modal to proceed with scraping
+   */
+  private async handleCookieConsent(page: Page): Promise<void> {
+    try {
+      console.log('🍪 Checking for cookie consent modal...');
+      
+      // Wait longer for modal to appear and become interactive
+      console.log('⏳ Waiting 5 seconds for modal to fully render...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // Loop to ensure modal is properly closed
+      let attempts = 0;
+      const maxDismissAttempts = 5;
+      
+      while (attempts < maxDismissAttempts) {
+        // Check if modal still exists and is visible
+        const modalState = await page.evaluate(() => {
+          const modal = document.getElementById('CybotCookiebotDialog');
+          if (!modal) return { exists: false };
+          
+          const style = window.getComputedStyle(modal);
+          const rect = modal.getBoundingClientRect();
+          
+          return {
+            exists: true,
+            display: style.display,
+            visibility: style.visibility,
+            opacity: style.opacity,
+            height: rect.height,
+            width: rect.width,
+            top: rect.top,
+            left: rect.left,
+            isVisible: !(style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0)
+          };
+        });
+        
+        if (!modalState.exists || !modalState.isVisible) {
+          console.log('✓ Cookie modal is not visible');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          break;
+        }
+        
+        console.log(`🤖 Modal visible (attempt ${attempts + 1}/${maxDismissAttempts}), attempting to dismiss...`);
+        
+        // Try multiple dismissal strategies in sequence
+        const dismissed = await page.evaluate(() => {
+          // Strategy 1: Find and click "Alle akzeptieren" / "Accept All" button
+          let buttons = Array.from(document.querySelectorAll('a, button, [role="button"]')) as HTMLElement[];
+          
+          // Search by data-action attribute first
+          let targetBtn = buttons.find(b => {
+            const action = b.getAttribute('data-action');
+            return action === 'accept-all' || action === 'acceptAll';
+          });
+          
+          // If not found, search by text content
+          if (!targetBtn) {
+            targetBtn = buttons.find(b => {
+              const text = (b.textContent || '').trim().toLowerCase();
+              return (
+                text === 'alle akzeptieren' ||
+                text === 'alle' ||
+                text.includes('akzeptieren') && !text.includes('notwendig') ||
+                text.includes('accept all') ||
+                text.includes('allow all')
+              );
+            });
+          }
+          
+          // Try to find in modal-specific container
+          if (!targetBtn) {
+            const modal = document.getElementById('CybotCookiebotDialog');
+            if (modal) {
+              const modalBtns = Array.from(modal.querySelectorAll('a, button')) as HTMLElement[];
+              targetBtn = modalBtns.find(b => {
+                const text = (b.textContent || '').trim().toLowerCase();
+                return text.includes('alle') || text.includes('akzept') || text.includes('accept');
+              });
+            }
+          }
+          
+          // If found, click it
+          if (targetBtn) {
+            console.log(`Clicking button: "${targetBtn.textContent?.trim()}"`);
+            targetBtn.click();
+            return true;
+          }
+          
+          return false;
+        });
+        
+        if (dismissed) {
+          console.log('  ✓ Clicked accept button');
+          // Wait for modal to close
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          attempts++;
+          continue;
+        }
+        
+        // If button click didn't work, try other methods
+        console.log('  ⚠️  No accept button found, trying alternative methods...');
+        
+        // Try pressing ESC key
+        await page.keyboard.press('Escape');
+        console.log('  → Pressed ESC key');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Try clicking outside modal
+        await page.evaluate(() => {
+          const overlay = document.querySelector('[class*="overlay"], [class*="backdrop"], [class*="modal-background"]');
+          if (overlay) {
+            (overlay as HTMLElement).click();
+          }
+        });
+        console.log('  → Clicked overlay/backdrop');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        attempts++;
+      }
+      
+      // Final verification
+      const stillVisible = await page.evaluate(() => {
+        const modal = document.getElementById('CybotCookiebotDialog');
+        if (!modal) return false;
+        const style = window.getComputedStyle(modal);
+        return !(style.display === 'none' || style.visibility === 'hidden');
+      });
+      
+      if (stillVisible) {
+        console.log('⚠️  Cookie modal still visible after all attempts, hiding with CSS...');
+        await page.evaluate(() => {
+          const modal = document.getElementById('CybotCookiebotDialog');
+          if (modal) {
+            (modal as HTMLElement).style.display = 'none';
+            (modal as HTMLElement).style.visibility = 'hidden';
+            (modal as HTMLElement).style.opacity = '0';
+            (modal as HTMLElement).style.pointerEvents = 'none';
+          }
+          // Also remove overlay if it exists
+          const overlay = document.querySelector('[class*="CybotCookie"][class*="Overlay"]');
+          if (overlay) {
+            (overlay as HTMLElement).style.display = 'none';
+          }
+        });
+        console.log('⏳ Waiting 3 seconds after CSS hide...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      } else {
+        console.log('✓ Cookie modal successfully dismissed');
+      }
+      
+    } catch (error) {
+      console.log('⚠️  Error handling cookie consent:', error);
+      // Continue anyway - the page might still be accessible
+    }
+    
+    // Always wait before returning to ensure page is ready
+    console.log('⏳ Waiting 3 seconds before proceeding with scraping...');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
   
   /**
    * Scrape a single job page
@@ -181,8 +345,35 @@ export class JobScraper {
         // Human-like delay before request
         await humanDelay();
         
-        const browser = await this.initBrowser();
-        page = await browser.newPage();
+        // Check if browser connection is still alive
+        try {
+          const browser = await this.initBrowser();
+          
+          // Test connection by getting browser version
+          if (!browser.isConnected?.()) {
+            console.log('⚠️  Browser connection lost, reinitializing...');
+            this.browser = null;
+            continue;
+          }
+          
+          page = await browser.newPage();
+        } catch (browserError) {
+          // Connection error - reset browser and retry
+          if (browserError instanceof Error && (
+            browserError.message.includes('Connection') || 
+            browserError.message.includes('closed') ||
+            browserError.message.includes('ECONNREFUSED')
+          )) {
+            console.log('⚠️  Browser connection error, resetting browser...');
+            this.browser = null;
+            retries++;
+            
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            continue;
+          }
+          throw browserError;
+        }
         
         // Setup human-like page properties
         await this.setupPage(page);
@@ -193,16 +384,44 @@ export class JobScraper {
           timeout: 50000 
         });
         
+        // Handle cookie consent modal
+        await this.handleCookieConsent(page);
+        
         // Human-like interaction on page
         await humanLikeInteraction(page);
         
         const html = await page.content();
-        await page.close();
+        
+        // Close page with timeout
+        try {
+          const closePromise = page.close();
+          await Promise.race([
+            closePromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Page close timeout')), 3000))
+          ]);
+        } catch (closeError) {
+          console.log('⚠️  Page close error, continuing...');
+        }
         
         return html;
       } catch (error) {
         retries++;
-        console.warn(`⚠️  Attempt ${retries}/${this.config.maxRetries} failed for ${url}:`, error);
+        
+        // Check if this is a connection/browser error
+        if (error instanceof Error && (
+          error.message.includes('Connection') || 
+          error.message.includes('closed') ||
+          error.name.includes('ConnectionClosedError') ||
+          error.name.includes('TargetClosedError')
+        )) {
+          console.log(`⚠️  Browser connection error (attempt ${retries}/${this.config.maxRetries}), resetting...`);
+          this.browser = null;
+          
+          // Wait longer before retry on connection errors
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        } else {
+          console.warn(`⚠️  Attempt ${retries}/${this.config.maxRetries} failed for ${url}:`, error);
+        }
         
         if (page) {
           try {
@@ -249,6 +468,17 @@ export class JobScraper {
           waitUntil: 'networkidle2',
           timeout: 50000 
         });
+        
+        // Wait for page & modal to fully render
+        console.log('⏳ Waiting 55 seconds for page to fully load...');
+        await new Promise(resolve => setTimeout(resolve, 55000));
+        
+        // Wait for page & modal to fully render  
+        console.log('⏳ Waiting 55 seconds for page to fully load...');
+        await new Promise(resolve => setTimeout(resolve, 55000));
+        
+        // Handle cookie consent modal
+        await this.handleCookieConsent(page);
         
         // Human-like interaction on page
         await humanLikeInteraction(page);
@@ -304,7 +534,8 @@ export class JobScraper {
       await this.setupPage(page);
       
       const baseUrl = 'https://www.ausbildung.de';
-      const listingUrl = `${baseUrl}/suche/?search=Fachinformatiker%2Fin+für+Anwendungsentwicklung%7C`;
+      // Use the correct URL with apprenticeshipType filter for Ausbildung (apprenticeships)
+      const listingUrl = `${baseUrl}/suche/?search=Anwendungsentwicklung%7C&apprenticeshipType=Ausbildung`;
       
       console.log('\n🌐 Scraping ALL jobs from listing page...');
       await page.goto(listingUrl, {
@@ -312,8 +543,33 @@ export class JobScraper {
         timeout: 60000,
       });
       
-      // Initial wait for page load
-      await randomDelay(4000, 5000);
+      // Handle cookie consent modal that appears on ausbildung.de
+      await this.handleCookieConsent(page);
+      
+      // Extra wait to ensure page and modal are completely gone
+      console.log('⏳ Extra wait (10 seconds) to ensure modal is gone and page is fully loaded...');
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      
+      // Verify modal is really gone
+      const modalGone = await page.evaluate(() => {
+        const modal = document.getElementById('CybotCookiebotDialog');
+        if (!modal) return true;
+        const style = window.getComputedStyle(modal);
+        return style.display === 'none' || style.visibility === 'hidden';
+      });
+      
+      if (!modalGone) {
+        console.log('⚠️  Modal still detected, trying one more time...');
+        await page.evaluate(() => {
+          const modal = document.getElementById('CybotCookiebotDialog');
+          if (modal) {
+            (modal as HTMLElement).style.display = 'none';
+          }
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } else {
+        console.log('✓ Modal confirmed gone, proceeding with scraping');
+      }
       
       // Load ALL jobs by clicking "Load more" button
       // Strategy: Scroll -> Wait 10-15s -> Scroll until button appears -> Click -> Repeat
@@ -321,7 +577,7 @@ export class JobScraper {
       let loadMoreAttempts = 0;
       const maxAttempts = 1000; // High limit to handle 3000-10000 jobs
       let consecutiveFailures = 0;
-      const maxConsecutiveFailures = 5; // Stop if button not found 5 times in a row
+      const maxConsecutiveFailures = 10; // Increased from 5 to 10 - be more persistent
       
       console.log('📜 Loading all jobs (clicking "Mehr Ergebnisse laden" button)...');
       console.log('   Strategy: Scroll -> Wait 10-15s -> Find button -> Click -> Repeat');
@@ -348,8 +604,8 @@ export class JobScraper {
         }
         
         // STEP 2: Wait 10-15 seconds for content to load
-        console.log(`  ⏳ Waiting 10-15 seconds for content to load...`);
-        await randomDelay(10000, 15000);
+        console.log(`  ⏳ Waiting 15-20 seconds for content to load...`);
+        await randomDelay(15000, 20000);
         
         // STEP 3: Scroll again to ensure button is visible
         await page.evaluate(() => {
@@ -359,25 +615,37 @@ export class JobScraper {
         
         // STEP 4: Try to find and click the "Mehr Ergebnisse laden" button
         const buttonClicked = await page.evaluate(() => {
-          // Look for the "Load more results" button
-          const buttons = Array.from(document.querySelectorAll('button'));
-          const loadMoreButton = buttons.find(btn => 
-            btn.textContent?.includes('Mehr Ergebnisse laden') ||
-            btn.textContent?.includes('Mehr Ergebnisse') ||
-            btn.textContent?.includes('Load more') ||
-            btn.classList.contains('Button-module__t8uWSa__button')
-          );
+          // Search for button/link with "Mehr Ergebnisse laden" text
+          const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'));
           
-          if (loadMoreButton && loadMoreButton instanceof HTMLButtonElement) {
-            // Check if button is visible and not disabled
-            const style = window.getComputedStyle(loadMoreButton);
-            const rect = loadMoreButton.getBoundingClientRect();
-            if (style.display !== 'none' && 
-                !loadMoreButton.disabled && 
-                rect.height > 0 && 
-                rect.width > 0) {
-              loadMoreButton.click();
-              return true;
+          for (const el of candidates) {
+            const text = (el.textContent || '').trim();
+            
+            // Check for exact or partial match with key words
+            if (text.includes('Mehr Ergebnisse laden') || 
+                text.includes('Mehr Ergebnisse') ||
+                (text.includes('Ergebnisse') && text.includes('laden'))) {
+              
+              // Verify visibility
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              
+              if (rect.height > 0 && rect.width > 0 && 
+                  style.display !== 'none' && 
+                  style.visibility !== 'hidden') {
+                
+                // Try to click
+                try {
+                  if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement) {
+                    el.click();
+                  } else {
+                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                  }
+                  return true;
+                } catch (e) {
+                  // Continue if this element fails
+                }
+              }
             }
           }
           
@@ -388,7 +656,7 @@ export class JobScraper {
           console.log(`  🔘 Clicked "Mehr Ergebnisse laden" button (attempt ${loadMoreAttempts + 1})`);
           loadMoreAttempts++;
           
-          // STEP 5: Scroll again after clicking to trigger loading
+          // STEP 5: Scroll after button click to trigger loading
           console.log(`  📜 Scrolling after button click...`);
           for (let i = 0; i < 2; i++) {
             await page.evaluate(() => {
@@ -397,7 +665,7 @@ export class JobScraper {
             await randomDelay(1000, 2000);
           }
           
-          // Wait a bit for new content to start loading
+          // Wait for new content to load
           await randomDelay(3000, 5000);
         } else {
           consecutiveFailures++;
@@ -494,11 +762,11 @@ export class JobScraper {
             if (!title) {
               // Try to extract first meaningful line as title
               const lines = cardText.split('\n').map(l => l.trim()).filter(l => l.length > 10);
-              if (lines.length > 0) title = lines[0];
+              if (lines.length > 0 && lines[0]) title = lines[0];
             }
             if (!company && cardText.includes('bei ')) {
               const match = cardText.match(/bei\s+([^\n]+)/i);
-              if (match) company = match[1].trim();
+              if (match && match[1]) company = match[1].trim();
             }
           }
           
@@ -513,9 +781,20 @@ export class JobScraper {
         return jobData;
       }, baseUrl);
       
-      await page.close();
-      
       console.log(`✅ Scraped ${jobs.length} jobs from listing page\n`);
+      
+      // Close page gracefully with timeout to avoid hanging
+      try {
+        const closePromise = page.close();
+        await Promise.race([
+          closePromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Page close timeout')), 5000))
+        ]);
+      } catch (closeError) {
+        console.log('⚠️  Page close had issues but jobs were captured, continuing...');
+        // Don't throw - page was already scraped successfully
+      }
+      
       return jobs;
       
     } catch (error) {
@@ -524,7 +803,7 @@ export class JobScraper {
         try {
           await page.close();
         } catch (e) {
-          // Ignore
+          // Ignore close errors
         }
       }
       return [];
@@ -746,7 +1025,7 @@ export class JobScraper {
       
       while (!found && scrollAttempts < maxScrollAttempts) {
         // Check if job exists on current visible page
-        const result = await page.evaluate((searchUuid: string | null, searchFullSlug: string) => {
+        const result = await page.evaluate((searchUuid: string | null | undefined, searchFullSlug: string) => {
           // Look for job card with matching URL
           const links = Array.from(document.querySelectorAll('a[href*="/stellen/"]'));
           
@@ -828,12 +1107,12 @@ export class JobScraper {
           }
           
           return { found: false, vacancyCount: null, matchedBy: 'none', totalLinks: links.length };
-        }, uuid, fullSlug);
+        }, uuid, fullSlug) as { found: boolean; vacancyCount: number | null; matchedBy: string; totalLinks?: number };
         
         if (result.found) {
           found = true;
           vacancyCount = result.vacancyCount;
-          console.log(`✓ Job found (matched by: ${(result as any).matchedBy})`);
+          console.log(`✓ Job found (matched by: ${result.matchedBy})`);
           break;
         }
         

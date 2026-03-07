@@ -1,4 +1,4 @@
-import { IJob, EducationLevel, GermanLevel, TariffType } from '@/types';
+import { IJob, EducationLevel, GermanLevel, TariffType, StartDateType } from '@/types';
 import mongoose, { Schema } from 'mongoose';
 
 
@@ -16,6 +16,11 @@ const JobSchema: Schema = new Schema({
 
   // Dates
   start_date: { type: Date, index: true }, // Index for "Starts in 2026" filter
+  start_date_type: { 
+    type: String, 
+    enum: Object.values(StartDateType),
+    default: StartDateType.FIXED
+  },
   duration_months: { type: Number, default: 36 },
   application_deadline: { type: Date },
   available_positions: { type: Number },
@@ -47,7 +52,12 @@ const JobSchema: Schema = new Schema({
     firstYearSalary: Number,
     thirdYearSalary: Number,
     average: { type: Number, index: true }, // Index for "Salary > X" filter
-    currency: { type: String, default: 'EUR' }
+    currency: { type: String, default: 'EUR' },
+    source: { 
+      type: String,
+      enum: ['scraped', 'company_website', 'tariff_standard', 'unknown'],
+      default: 'unknown'
+    }
   },
   
   // Tariff/Union Information
@@ -75,6 +85,10 @@ const JobSchema: Schema = new Schema({
   benefits_tags: [{ type: String, index: true }], // Machine readable tags for checkboxes
   benefits_verified: { type: Boolean, default: false }, // Whether benefits verified from official source
   benefits_last_updated: { type: Date }, // Last verification timestamp
+
+  // Employment Options
+  minijob_acceptance: { type: Boolean, default: false, index: true }, // Whether 450€ minijob accepted
+  minijob_acceptance_rate: { type: Number, min: 0, max: 100 }, // Percentage of positions accepting minijob
 
   // Content
   description_full: { type: String }, 

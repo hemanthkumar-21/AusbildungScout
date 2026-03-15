@@ -21,6 +21,7 @@ interface MinerConfig {
   maxJobsPerRun: number;
   dryRun: boolean;
   enrichSalary?: boolean; // Whether to check company websites for missing salaries
+  batchSizeExplicitlySet?: boolean; // Track if batch size was explicitly set via CLI
 }
 
 class JobMiner {
@@ -203,28 +204,43 @@ ${html}
 
   /**
    * Check if a job needs salary enrichment
+   * Enriches ALL jobs without salary - uses all available sources:
+   * 1. Description parsing (German text analysis)
+   * 2. Company website lookup
+   * 3. Tariff standards
    */
   private async shouldEnrichSalary(jobData: any): Promise<boolean> {
-    // Check if job doesn't have firstYearSalary but has a tariff
+    // Enrich ANY job that doesn't have a first year salary
+    // This triggers the 4-level priority resolver
     const hasNoSalary = !jobData.salary?.firstYearSalary;
-    const hasTariff = jobData.tariff_type && jobData.tariff_type !== 'None';
-    
-    return hasNoSalary && hasTariff;
+    return hasNoSalary;
   }
   
   /**
-   * Enrich job salary by checking company website
+   * Enrich job salary by checking all sources:
+   * Priority 1: Description parsing (if description exists)
+   * Priority 2: Company website lookup
+   * Priority 3: Tariff standards
    */
   private async enrichJobSalary(jobData: any): Promise<void> {
     try {
       console.log(`💰 Enriching salary for ${jobData.company_name}...`);
+      
+      // Collect all available description text for salary extraction
+      const descriptionTexts = [
+        jobData.description,
+        jobData.description_full,
+        jobData.job_description,
+        jobData.requirements
+      ].filter(Boolean).join(' ');
       
       const salaryResolution = await resolveFirstYearSalary(
         jobData.salary?.firstYearSalary,
         jobData.salary?.thirdYearSalary,
         jobData.tariff_type,
         jobData.company_name,
-        jobData.original_link
+        jobData.original_link,
+        descriptionTexts // Pass full description for Priority 2 parsing
       );
       
       if (salaryResolution.firstYearSalary) {
@@ -234,6 +250,7 @@ ${html}
         }
         
         jobData.salary.firstYearSalary = salaryResolution.firstYearSalary;
+        jobData.salary.source = salaryResolution.source; // Track which method found it
         
         if (salaryResolution.thirdYearSalary) {
           jobData.salary.thirdYearSalary = salaryResolution.thirdYearSalary;
@@ -243,19 +260,23 @@ ${html}
           jobData.salary.average = salaryResolution.average;
         }
         
+        if (salaryResolution.confidence) {
+          jobData.salary.confidence = salaryResolution.confidence;
+        }
+        
         jobData.benefits_last_updated = new Date();
         
-        console.log(`✓ Enriched salary: €${salaryResolution.firstYearSalary}/month (source: ${salaryResolution.source})`);
+        console.log(`✓ Enriched salary: €${salaryResolution.firstYearSalary}/month (source: ${salaryResolution.source}, confidence: ${salaryResolution.confidence})`);
       } else {
-        console.log(`\u2139\ufe0f No salary found from ${salaryResolution.source}`);
+        console.log(`ℹ️ No salary found - all 4 sources exhausted (description, website, tariff, fallback)`);
       }
       
       // Add delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
     } catch (error) {
-      console.warn(`\u26a0\ufe0f Salary enrichment failed: ${error}`)
-      // Continue anyway - job will still be saved with tariff standard salary
+      console.warn(`⚠️  Salary enrichment error: ${error}`);
+      // Continue anyway - job will still be saved with whatever salary was found
     }
   }
 
@@ -268,7 +289,6 @@ ${html}
   async mine(): Promise<void> {
     try {
       console.log('🔍 Starting Job Miner...');
-      console.log(`🎯 Max jobs per run: ${this.config.maxJobsPerRun}`);
       
       // Connect to database
       await connectDB();
@@ -284,6 +304,14 @@ ${html}
       }
       
       console.log(`📊 Found ${allListedJobs.length} jobs on listing page`);
+      
+      // === DYNAMIC BATCH SIZE: Use actual job count if not explicitly set ===
+      if (!this.config.batchSizeExplicitlySet) {
+        console.log(`🔄 Dynamically setting batch size to match job count (${allListedJobs.length} jobs)`);
+        this.config.maxJobsPerRun = allListedJobs.length;
+      } else {
+        console.log(`🎯 Using explicit batch size: ${this.config.maxJobsPerRun} jobs`);
+      }
       
       // Create a map for quick lookup
       const listedJobUrls = new Set(allListedJobs.map(j => j.url));
@@ -760,7 +788,7 @@ ${html}
       this.recordApiCall();
       
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.1-flash-lite-preview',
         contents: prompt,
       });
 
@@ -854,9 +882,12 @@ ${html}
 /**
  * Run the miner
  * Usage: 
- *   tsx src/miner.ts                    # Full mining with tariff salaries + company website enrichment
- *   tsx src/miner.ts --no-enrich-salary # Skip company website salary enrichment (faster)
- *   tsx src/miner.ts --dry-run          # Test without saving to DB
+ *   tsx src/miner.ts                              # SMART MODE: Auto-detect total job count, process all
+ *   tsx src/miner.ts --no-enrich-salary           # Skip company website enrichment (faster)
+ *   tsx src/miner.ts --dry-run                    # Test without saving to DB
+ *   tsx src/miner.ts --batch-size 250             # Process max 250 jobs per run (explicit limit)
+ *   tsx src/miner.ts --batch-size 0               # Process ALL jobs (no limit)
+ *   tsx src/miner.ts --no-enrich-salary --batch-size 500  # Combine options
  */
 async function main() {
   // Parse command line arguments
@@ -865,19 +896,44 @@ async function main() {
   const enrichSalary = !skipEnrichment; // Enabled by default
   const dryRun = args.includes('--dry-run') || process.env.DEMO_MODE === 'true';
   
-  if (enrichSalary) {
-    console.log('💰 Salary enrichment enabled - will check company websites for salary data');
-  } else {
-    console.log('⚡ Fast mode - using tariff standards only (no company website checks)');
+  // Parse batch size (if not specified, will be set dynamically based on actual job count)
+  let maxJobsPerRun = 999999; // Default: process all jobs found
+  let batchSizeExplicitlySet = false;
+  
+  const batchArg = args.find(arg => arg.startsWith('--batch-size'));
+  if (batchArg) {
+    const batchValue = batchArg.split('=')[1];
+    if (batchValue !== undefined) {
+      const parsed = parseInt(batchValue, 10);
+      if (!isNaN(parsed)) {
+        maxJobsPerRun = parsed === 0 ? 999999 : parsed; // 0 means unlimited
+        batchSizeExplicitlySet = true;
+      }
+    }
   }
+  
+  console.log('🚀 AusbildungScout Job Miner');
+  console.log(`   📊 Batch mode: ${!batchSizeExplicitlySet ? 'SMART (auto-detect job count)' : `EXPLICIT (max ${maxJobsPerRun} jobs)`}`);
+  
+  if (enrichSalary) {
+    console.log('   💰 Salary enrichment: ENABLED (will check company websites)');
+  } else {
+    console.log('   ⚡ Salary enrichment: DISABLED (fast mode - tariff standards only)');
+  }
+  
+  if (dryRun) {
+    console.log('   🧪 Mode: DRY RUN (no data saved to DB)');
+  }
+  console.log('');
   
   const config: MinerConfig = {
     urls: [
       'https://www.ausbildung.de/suche/?search=Anwendungsentwicklung%7C&apprenticeshipType=Ausbildung',
     ],
-    maxJobsPerRun: 100,
+    maxJobsPerRun,
     dryRun,
     enrichSalary,
+    batchSizeExplicitlySet,
   };
   
   const miner = new JobMiner(config);

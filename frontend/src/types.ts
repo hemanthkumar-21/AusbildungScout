@@ -46,6 +46,35 @@ export const StartDateType = {
 
 export type StartDateType = typeof StartDateType[keyof typeof StartDateType];
 
+// NEW: Hiring Process Types
+export const HiringProcessType = {
+  STANDARD: 'standard',
+  OFF_CYCLE_CAPABLE: 'off-cycle-capable',
+  FLEXIBLE: 'flexible',
+  NEGOTIABLE: 'negotiable',
+} as const;
+
+export type HiringProcessType = typeof HiringProcessType[keyof typeof HiringProcessType];
+
+export const DirectContactMethod = {
+  WHATSAPP: 'whatsapp',
+  PHONE: 'phone',
+  EMAIL_SENIOR: 'email-senior',
+  HR_PORTAL_ONLY: 'hr-portal-only',
+  MIXED: 'mixed',
+} as const;
+
+export type DirectContactMethod = typeof DirectContactMethod[keyof typeof DirectContactMethod];
+
+export const FlexibilityScore = {
+  LOW: 'low',
+  MEDIUM: 'medium',
+  HIGH: 'high',
+  UNKNOWN: 'unknown',
+} as const;
+
+export type FlexibilityScore = typeof FlexibilityScore[keyof typeof FlexibilityScore];
+
 export interface ILocation {
   city: string;
   zip_code?: string;
@@ -78,6 +107,20 @@ export interface IRelocationSupport {
   details?: string;
 }
 
+// NEW: Hiring Process Interface
+export interface IHiringProcess {
+  process_type?: HiringProcessType;
+  direct_contact_methods?: DirectContactMethod[];
+  decision_speed?: 'slow' | 'medium' | 'fast';
+  verkshuerzung_supported?: boolean;
+  tariff_negotiable?: boolean;
+  min_salary_negotiable?: boolean;
+  off_cycle_intake_possible?: boolean;
+  hiring_contact_name?: string;
+  hiring_contact_method?: DirectContactMethod;
+  notes?: string;
+}
+
 export interface IJob {
   _id: string;
   job_title: string;
@@ -98,6 +141,8 @@ export interface IJob {
   tariff_type?: TariffType;
   visa_sponsorship?: boolean;
   relocation_support?: IRelocationSupport;
+  hiring_process?: IHiringProcess;
+  company_flexibility?: FlexibilityScore;
   benefits?: string[];
   benefits_tags?: string[];
   benefits_verified?: boolean;
@@ -138,7 +183,16 @@ export interface JobFilterQuery {
   minijobAccepted?: boolean;
   minMinijobAcceptanceRate?: number;
   hideInactive?: boolean;
-  sortBy?: 'salary-high' | 'salary-low' | 'duration-short' | 'default';
+  sortBy?: 'salary-high' | 'salary-low' | 'duration-short' | 'flexibility' | 'default';
+  // NEW: Hiring Process Filters
+  hiringProcessTypes?: string;
+  directContactMethods?: string;
+  offCycleIntakePossible?: boolean;
+  verkshuerzungSupported?: boolean;
+  tariffNegotiable?: boolean;
+  minSalaryNegotiable?: boolean;
+  decisionSpeedMinimum?: 'fast' | 'medium' | 'slow';
+  companyFlexibilityMinimum?: FlexibilityScore;
 }
 
 export interface PaginationInfo {

@@ -309,7 +309,10 @@ Rules:
    - "Fluent/Native" = C2
    
 2. Salary: Extract only firstYearSalary and thirdYearSalary when available.
-   If only "Tarifvertrag" is mentioned, return null (don't guess).
+   - **IMPORTANT: All salaries should be extracted as MONTHLY amounts in EUR**
+   - If you see "1.264€", that is 1,264 EUR/month (NOT 15,000)
+   - If salary appears to be annual (e.g., > 8000), divide by 12 to get monthly
+   - If only "Tarifvertrag" is mentioned without amount, return null (don't guess).
 
 3. Tariff Type: Identify collective bargaining agreement (Tarifvertrag) if mentioned:
    - "IG Metall" for metal/electrical engineering

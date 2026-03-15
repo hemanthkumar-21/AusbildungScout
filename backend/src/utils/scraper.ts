@@ -18,7 +18,7 @@ const defaultConfig: ScraperConfig = {
   minDelayMs: 2000,
   maxDelayMs: 5000,
   maxRetries: 3,
-  headless: false,
+  headless: true,
 };
 
 /**
@@ -130,7 +130,6 @@ export class JobScraper {
       this.browser = await puppeteer.launch({
         headless: this.config.headless,
         slowMo: 250,
-        devtools: true,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',

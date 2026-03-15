@@ -69,6 +69,7 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
             <option value="salary-high">Salary: High to Low</option>
             <option value="salary-low">Salary: Low to High</option>
             <option value="duration-short">Duration: Shortest First</option>
+            <option value="flexibility">⚡ Most Flexible Companies</option>
           </select>
         </div>
 
@@ -432,6 +433,162 @@ export default function FilterSidebar({ filters, onFilterChange, onSearch }: Fil
                 </label>
               );
             })}
+          </div>
+        </div>
+
+        {/* NEW: Hiring Process & Negotiation Section (CRITICAL FOR YOUR STRATEGY) */}
+        <div className="border-t pt-4 bg-amber-50 p-4 rounded-lg">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">⚡ Hiring Process & Flexibility</h3>
+          <p className="text-xs text-gray-600 mb-3">Find companies willing to negotiate off-cycle (March 2027) hires</p>
+          
+          <div className="space-y-3">
+            {/* Off-Cycle Intake (CRITICAL) */}
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filters.offCycleIntakePossible || false}
+                onChange={(e) => handleInputChange('offCycleIntakePossible', e.target.checked)}
+                className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500"
+              />
+              <span className="text-sm font-medium text-amber-900">
+                ⭐ Can Hire Off-Cycle (March 2027)
+              </span>
+            </label>
+            <p className="text-xs text-amber-700 ml-6">Companies flexible on hiring dates, not just August</p>
+
+            {/* Verkürzung Support */}
+            <label className="flex items-center space-x-2 cursor-pointer mt-2">
+              <input
+                type="checkbox"
+                checked={filters.verkshuerzungSupported || false}
+                onChange={(e) => handleInputChange('verkshuerzungSupported', e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">
+                Supports Verkürzung (IHK Shortening)
+              </span>
+            </label>
+            <p className="text-xs text-gray-500 ml-6">Will petition IHK to reduce 3-year to 2.5/2 years</p>
+
+            {/* Tariff Negotiable */}
+            <label className="flex items-center space-x-2 cursor-pointer mt-2">
+              <input
+                type="checkbox"
+                checked={filters.tariffNegotiable || false}
+                onChange={(e) => handleInputChange('tariffNegotiable', e.target.checked)}
+                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+              />
+              <span className="text-sm text-gray-700">
+                Tariff Negotiable (Above Minimum)
+              </span>
+            </label>
+            <p className="text-xs text-gray-500 ml-6">Not strictly bound by union salary minimums</p>
+
+            {/* Salary Negotiable */}
+            <label className="flex items-center space-x-2 cursor-pointer mt-2">
+              <input
+                type="checkbox"
+                checked={filters.minSalaryNegotiable || false}
+                onChange={(e) => handleInputChange('minSalaryNegotiable', e.target.checked)}
+                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+              />
+              <span className="text-sm text-gray-700">
+                Base Salary Negotiable
+              </span>
+            </label>
+            <p className="text-xs text-gray-500 ml-6">Willing to negotiate higher starting salary</p>
+
+            {/* Company Flexibility Filter */}
+            <div className="mt-3 pt-3 border-t">
+              <label className="block text-xs font-medium text-gray-700 mb-2">
+                Company Flexibility Level
+              </label>
+              <select
+                value={filters.companyFlexibilityMinimum || ''}
+                onChange={(e) => handleInputChange('companyFlexibilityMinimum', e.target.value || undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              >
+                <option value="">Any</option>
+                <option value="high">High (Very Flexible, Negotiation-Friendly)</option>
+                <option value="medium">Medium (Typical Companies)</option>
+                <option value="low">Low (Rigid Rules)</option>
+              </select>
+            </div>
+
+            {/* Direct Contact Methods */}
+            <div className="mt-3 pt-3 border-t">
+              <label className="block text-xs font-medium text-gray-700 mb-2">
+                Direct Contact Available Via:
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.directContactMethods?.includes('whatsapp') || false}
+                    onChange={(e) => {
+                      const methods = filters.directContactMethods?.split(',') || [];
+                      const filtered = methods.filter(m => m !== 'whatsapp');
+                      if (e.target.checked) {
+                        filtered.push('whatsapp');
+                      }
+                      handleInputChange('directContactMethods', filtered.length > 0 ? filtered.join(',') : undefined);
+                    }}
+                    className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-gray-700">WhatsApp 📱</span>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.directContactMethods?.includes('phone') || false}
+                    onChange={(e) => {
+                      const methods = filters.directContactMethods?.split(',') || [];
+                      const filtered = methods.filter(m => m !== 'phone');
+                      if (e.target.checked) {
+                        filtered.push('phone');
+                      }
+                      handleInputChange('directContactMethods', filtered.length > 0 ? filtered.join(',') : undefined);
+                    }}
+                    className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-gray-700">Direct Phone ☎️</span>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.directContactMethods?.includes('email-senior') || false}
+                    onChange={(e) => {
+                      const methods = filters.directContactMethods?.split(',') || [];
+                      const filtered = methods.filter(m => m !== 'email-senior');
+                      if (e.target.checked) {
+                        filtered.push('email-senior');
+                      }
+                      handleInputChange('directContactMethods', filtered.length > 0 ? filtered.join(',') : undefined);
+                    }}
+                    className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-gray-700">Email (Decision Maker) 💼</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Decision Speed */}
+            <div className="mt-3 pt-3 border-t">
+              <label className="block text-xs font-medium text-gray-700 mb-2">
+                Min. Decision Speed
+              </label>
+              <select
+                value={filters.decisionSpeedMinimum || ''}
+                onChange={(e) => handleInputChange('decisionSpeedMinimum', e.target.value || undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              >
+                <option value="">Any</option>
+                <option value="fast">Fast (Quick Offers)</option>
+                <option value="medium">Medium (Normal Process)</option>
+              </select>
+            </div>
           </div>
         </div>
 

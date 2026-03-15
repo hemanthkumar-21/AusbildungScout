@@ -3,7 +3,7 @@
  * Implements the three-phase filtering pipeline with enhanced salary and start date filters
  */
 
-import { GermanLevelRank, GermanLevel, TariffType, StartDateType } from '@/types';
+import { GermanLevelRank, GermanLevel, TariffType, StartDateType, HiringProcessType, DirectContactMethod, FlexibilityScore } from '@/types';
 
 export interface JobFilterQuery {
   // Hard Constraints
@@ -36,8 +36,19 @@ export interface JobFilterQuery {
   minijobAccepted?: boolean;           // Filter for minijob acceptance
   minMinijobAcceptanceRate?: number;   // NEW: Minimum acceptance rate (0-100%)
   
+  // ===== HIRING PROCESS FILTERS (NEW - Critical for your strategy) =====
+  hiringProcessTypes?: HiringProcessType[]; // standard, off-cycle-capable, flexible, negotiable
+  directContactMethods?: DirectContactMethod[]; // whatsapp, phone, email-senior, etc.
+  offCycleIntakePossible?: boolean;    // Critical: Can they hire March 2027?
+  verkshuerzungSupported?: boolean;    // Can they support IHK shortening petitions?
+  tariffNegotiable?: boolean;          // Willing to negotiate above tariff minimums
+  minSalaryNegotiable?: boolean;       // Base salary is negotiable
+  decisionSpeedMinimum?: 'fast' | 'medium' | 'slow'; // Filter by decision speed
+  companyFlexibilityMinimum?: FlexibilityScore; // Only show high/medium flexibility?
+  // ========================================================================
+  
   hideInactive?: boolean;              // Hide inactive/stale jobs
-  sortBy?: 'salary-high' | 'salary-low' | 'duration-short' | 'default';  // NEW: duration sorting
+  sortBy?: 'salary-high' | 'salary-low' | 'duration-short' | 'flexibility' | 'default';  // NEW: flexibility sorting
   
   // Fuzzy Search
   searchTerm?: string;
@@ -179,6 +190,58 @@ export function buildMongoDBFilter(query: JobFilterQuery) {
     filter.minijob_acceptance_rate = { $gte: query.minMinijobAcceptanceRate };
   }
   
+  // ===== HIRING PROCESS FILTERS (NEW) =====
+  // Hiring Process Type Filter
+  if (query.hiringProcessTypes && query.hiringProcessTypes.length > 0) {
+    filter['hiring_process.process_type'] = { $in: query.hiringProcessTypes };
+  }
+  
+  // Direct Contact Methods (any of these methods available)
+  if (query.directContactMethods && query.directContactMethods.length > 0) {
+    filter['hiring_process.direct_contact_methods'] = { $in: query.directContactMethods };
+  }
+  
+  // Critical: Off-cycle intake (March 2027) capability
+  if (query.offCycleIntakePossible === true) {
+    filter['hiring_process.off_cycle_intake_possible'] = true;
+  }
+  
+  // Verkürzung Support (IHK petition support)
+  if (query.verkshuerzungSupported === true) {
+    filter['hiring_process.verkshuerzung_supported'] = true;
+  }
+  
+  // Tariff Negotiability
+  if (query.tariffNegotiable === true) {
+    filter['hiring_process.tariff_negotiable'] = true;
+  }
+  
+  // Salary Negotiability
+  if (query.minSalaryNegotiable === true) {
+    filter['hiring_process.min_salary_negotiable'] = true;
+  }
+  
+  // Decision Speed Filter
+  if (query.decisionSpeedMinimum) {
+    const speedRank = { slow: 0, medium: 1, fast: 2 };
+    const minRank = speedRank[query.decisionSpeedMinimum];
+    const allowedSpeeds = Object.entries(speedRank)
+      .filter(([_, rank]) => rank >= minRank)
+      .map(([speed]) => speed);
+    filter['hiring_process.decision_speed'] = { $in: allowedSpeeds };
+  }
+  
+  // Company Flexibility Score Filter
+  if (query.companyFlexibilityMinimum) {
+    const flexRank = { low: 0, medium: 1, high: 2, unknown: -1 };
+    const minRank = flexRank[query.companyFlexibilityMinimum];
+    const allowedFlex = Object.entries(flexRank)
+      .filter(([_, rank]) => rank >= minRank || rank === -1) // Include unknown
+      .map(([flex]) => flex);
+    filter.company_flexibility = { $in: allowedFlex };
+  }
+  // ======================================
+  
   // === PHASE 3: FUZZY SEARCH ===
   // Text search is handled separately via $text operator
   if (query.searchTerm) {
@@ -228,6 +291,15 @@ export function buildSortOptions(searchTerm?: string, sortBy?: string): any {
   if (sortBy === 'duration-short') {
     // Shorter apprenticeships first (useful for career changers)
     return { duration_months: 1, posted_at: -1 };
+  }
+  
+  if (sortBy === 'flexibility') {
+    // Sort by company flexibility (high first) - NEW for negotiation-friendly companies
+    return { 
+      company_flexibility: -1, // Descending (high first)
+      'hiring_process.off_cycle_intake_possible': -1, // Off-cycle capable first
+      posted_at: -1 
+    };
   }
   
   // Default: Sort by most recently posted first

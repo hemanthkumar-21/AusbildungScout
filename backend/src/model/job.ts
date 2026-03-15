@@ -90,6 +90,42 @@ const JobSchema: Schema = new Schema({
   minijob_acceptance: { type: Boolean, default: false, index: true }, // Whether 450€ minijob accepted
   minijob_acceptance_rate: { type: Number, min: 0, max: 100 }, // Percentage of positions accepting minijob
 
+  // Hiring Process Details (NEW - Critical for off-cycle negotiations)
+  hiring_process: {
+    process_type: {
+      type: String,
+      enum: ['standard', 'off-cycle-capable', 'flexible', 'negotiable'],
+      default: 'standard',
+      index: true // Important for filtering
+    },
+    direct_contact_methods: [
+      {
+        type: String,
+        enum: ['whatsapp', 'phone', 'email-senior', 'hr-portal-only', 'mixed']
+      }
+    ],
+    decision_speed: {
+      type: String,
+      enum: ['slow', 'medium', 'fast'],
+      default: 'medium'
+    },
+    verkshuerzung_supported: { type: Boolean, default: false }, // IHK shortening support
+    tariff_negotiable: { type: Boolean, default: false }, // Above-tariff negotiation possible
+    min_salary_negotiable: { type: Boolean, default: false }, // Salary negotiation possible
+    off_cycle_intake_possible: { type: Boolean, default: false, index: true }, // Critical for March intake
+    hiring_contact_name: String, // Direct contact person
+    hiring_contact_method: String, // Best method to reach them
+    notes: String // Additional flexibility info
+  },
+  
+  // Company Flexibility Score (for sorting and advanced filtering)
+  company_flexibility: {
+    type: String,
+    enum: ['low', 'medium', 'high', 'unknown'],
+    default: 'unknown',
+    index: true // For filtering companies willing to negotiate
+  },
+
   // Content
   description_full: { type: String }, 
   description_snippet: { type: String },

@@ -52,6 +52,31 @@ export enum StartDateType {
   NEGOTIABLE = 'negotiable',          // Can be discussed/negotiated
 }
 
+// Hiring Process Types - Critical for your use case
+export enum HiringProcessType {
+  STANDARD = 'standard',              // Follows typical August intake with rigid process
+  OFF_CYCLE_CAPABLE = 'off-cycle-capable', // Can hire outside standard August window (March etc)
+  FLEXIBLE = 'flexible',              // Very flexible on timing and process
+  NEGOTIABLE = 'negotiable',          // Open to discussion on process
+}
+
+// Direct Contact Capability - For reaching decision makers
+export enum DirectContactMethod {
+  WHATSAPP = 'whatsapp',              // WhatsApp contact possible
+  PHONE = 'phone',                    // Direct phone contact
+  EMAIL_SENIOR = 'email-senior',      // Direct email to decision maker (not HR portal)
+  HR_PORTAL_ONLY = 'hr-portal-only',  // Only through standard HR portal
+  MIXED = 'mixed',                    // Multiple direct contact methods available
+}
+
+// Company Flexibility Score - How negotiation-friendly
+export enum FlexibilityScore {
+  LOW = 'low',                        // Rigid tariffs, standard only
+  MEDIUM = 'medium',                  // Some flexibility, typical company
+  HIGH = 'high',                      // Very flexible, startup-like, willing to negotiate
+  UNKNOWN = 'unknown',                // Unknown flexibility level
+}
+
 // --- Interfaces ---
 export interface ILocation {
   city: string;
@@ -86,6 +111,20 @@ export interface IRelocationSupport {
   details?: string;                     // Additional details
 }
 
+// Hiring Process Details - Critical for off-cycle negotiations
+export interface IHiringProcess {
+  process_type: HiringProcessType;      // Standard, off-cycle, flexible, etc.
+  direct_contact_methods?: DirectContactMethod[]; // How to reach them directly
+  decision_speed?: 'slow' | 'medium' | 'fast'; // How fast they make decisions
+  verkshuerzung_supported?: boolean;    // Do they support IHK shortening petitions?
+  tariff_negotiable?: boolean;          // Willing to negotiate above tariff minimums
+  min_salary_negotiable?: boolean;      // Base salary is negotiable
+  off_cycle_intake_possible?: boolean;  // Can they hire outside Aug/Sept?
+  hiring_contact_name?: string;         // Name of decision maker (if available)
+  hiring_contact_method?: DirectContactMethod; // Best method to reach them
+  notes?: string;                       // Additional hiring flexibility notes
+}
+
 export interface IJob extends Document {
   // Core Info
   job_title: string;
@@ -118,6 +157,10 @@ export interface IJob extends Document {
   benefits_tags?: string[]; // Standardized tags: ["30_DAYS_VACATION", "LAPTOP", "CANTEEN", "13TH_SALARY"]
   benefits_verified?: boolean; // Whether benefits were verified from official company source
   benefits_last_updated?: Date; // Last time benefits were updated from official source
+  
+  // Hiring & Negotiation Details (NEW - Critical for your strategy)
+  hiring_process?: IHiringProcess;    // Process flexibility and direct contact info
+  company_flexibility?: FlexibilityScore; // How negotiation-friendly (indexed for sorting)
   
   // Employment Options
   minijob_acceptance?: boolean; // Whether minijob (450€) is accepted as alternative

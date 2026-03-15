@@ -158,15 +158,31 @@ export async function resolveFirstYearSalary(
   descriptionFull?: string
 ): Promise<SalaryResolutionResult> {
   
-  // Priority 1: Use scraped data if available
-  if (scrapedFirstYear && scrapedFirstYear > 0) {
-    console.log(`[Salary] Using scraped first year salary: ${scrapedFirstYear} EUR`);
+  // Helper to validate and convert annual to monthly if needed
+  const normalizeToMonthly = (salary: number | undefined): number | undefined => {
+    if (!salary || salary <= 0) return undefined;
+    
+    // If salary is > 8000, it's likely annual - convert to monthly
+    if (salary > 8000) {
+      const monthly = Math.round(salary / 12);
+      console.log(`[Salary] Converting annual ${salary} EUR to monthly: ${monthly} EUR/month`);
+      return monthly;
+    }
+    
+    return salary;
+  };
+  
+  // Priority 1: Use scraped data if available (but validate monthly format)
+  const monthlyScrapedFirstYear = normalizeToMonthly(scrapedFirstYear);
+  if (monthlyScrapedFirstYear && monthlyScrapedFirstYear > 0) {
+    console.log(`[Salary] Using scraped first year salary: ${monthlyScrapedFirstYear} EUR/month`);
+    const monthlyScrapedThirdYear = normalizeToMonthly(scrapedThirdYear);
     return {
-      firstYearSalary: scrapedFirstYear,
-      ...(scrapedThirdYear && { thirdYearSalary: scrapedThirdYear }),
-      average: scrapedThirdYear 
-        ? Math.round((scrapedFirstYear + scrapedThirdYear) / 2)
-        : scrapedFirstYear,
+      firstYearSalary: monthlyScrapedFirstYear,
+      ...(monthlyScrapedThirdYear && { thirdYearSalary: monthlyScrapedThirdYear }),
+      average: monthlyScrapedThirdYear 
+        ? Math.round((monthlyScrapedFirstYear + monthlyScrapedThirdYear) / 2)
+        : monthlyScrapedFirstYear,
       source: 'scraped',
       confidence: 'high'
     };
@@ -175,12 +191,14 @@ export async function resolveFirstYearSalary(
   // Priority 2: Try extracting from description
   if (descriptionFull) {
     const parsed = extractSalaryFromDescription(descriptionFull);
-    if (parsed.firstYear && parsed.firstYear > 0) {
-      console.log(`[Salary] Extracted from description: ${parsed.firstYear} EUR (1st year)`);
+    const monthlyFirstYear = normalizeToMonthly(parsed.firstYear);
+    if (monthlyFirstYear && monthlyFirstYear > 0) {
+      const monthlyThirdYear = normalizeToMonthly(parsed.thirdYear);
+      console.log(`[Salary] Extracted from description: ${monthlyFirstYear} EUR/month (1st year)`);
       return {
-        firstYearSalary: parsed.firstYear,
-        ...(parsed.thirdYear && { thirdYearSalary: parsed.thirdYear }),
-        ...(parsed.firstYear && parsed.thirdYear && { average: Math.round((parsed.firstYear + parsed.thirdYear) / 2) }),
+        firstYearSalary: monthlyFirstYear,
+        ...(monthlyThirdYear && { thirdYearSalary: monthlyThirdYear }),
+        ...(monthlyFirstYear && monthlyThirdYear && { average: Math.round((monthlyFirstYear + monthlyThirdYear) / 2) }),
         source: 'description_parsed',
         confidence: 'medium'
       };
@@ -260,14 +278,30 @@ export function resolveFirstYearSalaryFast(
   descriptionFull?: string
 ): SalaryResolutionResult {
   
-  // Use scraped data if available
-  if (scrapedFirstYear && scrapedFirstYear > 0) {
+  // Helper to validate and convert annual to monthly if needed
+  const normalizeToMonthly = (salary: number | undefined): number | undefined => {
+    if (!salary || salary <= 0) return undefined;
+    
+    // If salary is > 8000, it's likely annual - convert to monthly
+    if (salary > 8000) {
+      const monthly = Math.round(salary / 12);
+      console.log(`[Salary] Converting annual ${salary} EUR to monthly: ${monthly} EUR/month`);
+      return monthly;
+    }
+    
+    return salary;
+  };
+  
+  // Use scraped data if available (but validate monthly format)
+  const monthlyScrapedFirstYear = normalizeToMonthly(scrapedFirstYear);
+  if (monthlyScrapedFirstYear && monthlyScrapedFirstYear > 0) {
+    const monthlyScrapedThirdYear = normalizeToMonthly(scrapedThirdYear);
     return {
-      firstYearSalary: scrapedFirstYear,
-      ...(scrapedThirdYear && { thirdYearSalary: scrapedThirdYear }),
-      average: scrapedThirdYear 
-        ? Math.round((scrapedFirstYear + scrapedThirdYear) / 2)
-        : scrapedFirstYear,
+      firstYearSalary: monthlyScrapedFirstYear,
+      ...(monthlyScrapedThirdYear && { thirdYearSalary: monthlyScrapedThirdYear }),
+      average: monthlyScrapedThirdYear 
+        ? Math.round((monthlyScrapedFirstYear + monthlyScrapedThirdYear) / 2)
+        : monthlyScrapedFirstYear,
       source: 'scraped',
       confidence: 'high'
     };
@@ -276,11 +310,13 @@ export function resolveFirstYearSalaryFast(
   // Try to extract from description
   if (descriptionFull) {
     const parsed = extractSalaryFromDescription(descriptionFull);
-    if (parsed.firstYear && parsed.firstYear > 0) {
+    const monthlyFirstYear = normalizeToMonthly(parsed.firstYear);
+    if (monthlyFirstYear && monthlyFirstYear > 0) {
+      const monthlyThirdYear = normalizeToMonthly(parsed.thirdYear);
       return {
-        firstYearSalary: parsed.firstYear,
-        ...(parsed.thirdYear && { thirdYearSalary: parsed.thirdYear }),
-        ...(parsed.firstYear && parsed.thirdYear && { average: Math.round((parsed.firstYear + parsed.thirdYear) / 2) }),
+        firstYearSalary: monthlyFirstYear,
+        ...(monthlyThirdYear && { thirdYearSalary: monthlyThirdYear }),
+        ...(monthlyFirstYear && monthlyThirdYear && { average: Math.round((monthlyFirstYear + monthlyThirdYear) / 2) }),
         source: 'description_parsed',
         confidence: 'medium'
       };

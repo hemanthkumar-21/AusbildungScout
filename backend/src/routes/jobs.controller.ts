@@ -23,10 +23,17 @@ export async function getJobs(req: Request, res: Response) {
     if (req.query.germanLevel) query.germanLevel = req.query.germanLevel as any;
     if (req.query.visaNeed === 'true') query.visaNeed = true;
     if (req.query.minSalary) query.minSalary = parseInt(req.query.minSalary as string);
+    if (req.query.maxSalary) query.maxSalary = parseInt(req.query.maxSalary as string);
+    if (req.query.salaryAboveAverage === 'true') query.salaryAboveAverage = true;
     if (req.query.startDate) query.startDate = req.query.startDate as string;
+    if (req.query.startDateType) query.startDateType = (req.query.startDateType as string).split(',') as any[];
     if (req.query.educationLevel) query.educationLevel = req.query.educationLevel as string;
     if (req.query.search) query.searchTerm = req.query.search as string;
     if (req.query.minVacancies) query.minVacancies = parseInt(req.query.minVacancies as string);
+    if (req.query.maxDurationMonths) query.maxDurationMonths = parseInt(req.query.maxDurationMonths as string);
+    if (req.query.minDurationMonths) query.minDurationMonths = parseInt(req.query.minDurationMonths as string);
+    if (req.query.minijobAccepted === 'true') query.minijobAccepted = true;
+    if (req.query.minMinijobAcceptanceRate) query.minMinijobAcceptanceRate = parseInt(req.query.minMinijobAcceptanceRate as string);
     if (req.query.tariffTypes) query.tariffTypes = (req.query.tariffTypes as string).split(',') as any[];
     if (req.query.relocationSupport === 'true') query.relocationSupport = true;
     if (req.query.rentSubsidy === 'true') query.rentSubsidy = true;
@@ -34,6 +41,16 @@ export async function getJobs(req: Request, res: Response) {
     if (req.query.benefitTags) query.benefitTags = (req.query.benefitTags as string).split(',');
     if (req.query.hideInactive === 'true') query.hideInactive = true;
     if (req.query.sortBy) query.sortBy = req.query.sortBy as any;
+    
+    // NEW: Hiring Process Filters
+    if (req.query.hiringProcessTypes) query.hiringProcessTypes = (req.query.hiringProcessTypes as string).split(',') as any[];
+    if (req.query.directContactMethods) query.directContactMethods = (req.query.directContactMethods as string).split(',') as any[];
+    if (req.query.offCycleIntakePossible === 'true') query.offCycleIntakePossible = true;
+    if (req.query.verkshuerzungSupported === 'true') query.verkshuerzungSupported = true;
+    if (req.query.tariffNegotiable === 'true') query.tariffNegotiable = true;
+    if (req.query.minSalaryNegotiable === 'true') query.minSalaryNegotiable = true;
+    if (req.query.decisionSpeedMinimum) query.decisionSpeedMinimum = req.query.decisionSpeedMinimum as any;
+    if (req.query.companyFlexibilityMinimum) query.companyFlexibilityMinimum = req.query.companyFlexibilityMinimum as any;
     
     // Build MongoDB filter
     const filter = buildMongoDBFilter(query);

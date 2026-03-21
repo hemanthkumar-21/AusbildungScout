@@ -521,8 +521,246 @@ export class JobScraper {
   }
   
   /**
+   * PHASE 1: Load all jobs until reaching the bottom
+   * Focus: Load all data first (5000 jobs or more)
+   * Uses infinite scroll component
+   */
+  private async loadAllJobsUntilEnd(page: Page): Promise<number> {
+    console.log('\n📥 PHASE 1: LOADING - Scrolling to load ALL jobs until end...');
+    
+    let previousJobCount = 0;
+    let loadMoreAttempts = 0;
+    const maxAttempts = 1000; // Allow up to 1000 attempts for 4000+ jobs
+    let consecutiveNoNewResults = 0;
+    const noNewResultsThreshold = 15; // After 15 consecutive failures, consider done
+    
+    while (loadMoreAttempts < maxAttempts && consecutiveNoNewResults < noNewResultsThreshold) {
+      // Count jobs in infinite-scroll-component using data-testid (most reliable)
+      const currentJobCount = await page.evaluate(() => {
+        const infiniteScrollDiv = document.querySelector('.infinite-scroll-component');
+        if (!infiniteScrollDiv) return 0;
+        // Use data-testid selector which is more reliable than class selectors
+        return infiniteScrollDiv.querySelectorAll('[data-testid="jp-card"]').length;
+      });
+      
+      if (currentJobCount > previousJobCount) {
+        console.log(`  ✓ Loaded ${currentJobCount} jobs...`);
+        previousJobCount = currentJobCount;
+        consecutiveNoNewResults = 0; // Reset on success
+      } else {
+        consecutiveNoNewResults++;
+      }
+      
+      // STEP 1: Scroll to bottom to trigger lazy loading
+      console.log(`  📜 Scroll #${loadMoreAttempts + 1}: Scrolling to bottom...`);
+      const didScroll = await page.evaluate(() => {
+        const infiniteScrollDiv = document.querySelector('.infinite-scroll-component');
+        if (!infiniteScrollDiv) return false;
+        
+        const scrollHeight = infiniteScrollDiv.scrollHeight;
+        const scrollTop = infiniteScrollDiv.scrollTop;
+        const clientHeight = infiniteScrollDiv.clientHeight;
+        
+        // Scroll the infinite-scroll-component div itself
+        infiniteScrollDiv.scrollTop = scrollHeight;
+        
+        // Also scroll window as fallback
+        window.scrollTo(0, document.body.scrollHeight);
+        
+        return scrollHeight > 0;
+      });
+      
+      if (!didScroll) {
+        console.log(`  ⚠️  Could not scroll infinite-scroll-component (not found?)`);
+      }
+      
+      // STEP 2: Wait 8-12 seconds for lazy loading to trigger
+      console.log(`  ⏳ Waiting 8-12 seconds for content to load...`);
+      await randomDelay(8000, 12000);
+      
+      // STEP 3: Try clicking "Load more" button if visible
+      const buttonClicked = await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+        
+        for (const el of candidates) {
+          const text = (el.textContent || '').trim();
+          
+          if (text.includes('Mehr Ergebnisse laden') || 
+              text.includes('Mehr Ergebnisse') ||
+              (text.includes('Ergebnisse') && text.includes('laden'))) {
+            
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            
+            // Check if visible
+            if (rect.height > 0 && rect.width > 0 && 
+                style.display !== 'none' && 
+                style.visibility !== 'hidden') {
+              
+              try {
+                if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement) {
+                  el.click();
+                } else {
+                  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                }
+                return true;
+              } catch (e) {
+                // Ignore click errors
+              }
+            }
+          }
+        }
+        
+        return false;
+      });
+      
+      if (buttonClicked) {
+        console.log(`  🔘 Clicked "Load more" button`);
+        await randomDelay(4000, 6000);
+      }
+      
+      loadMoreAttempts++;
+      
+      // Progress indicator every 10 attempts
+      if (loadMoreAttempts % 10 === 0) {
+        console.log(`  ⏱️  Scroll attempts: ${loadMoreAttempts}, Jobs loaded: ${currentJobCount}`);
+      }
+    }
+    
+    // Get final count
+    const finalJobCount = await page.evaluate(() => {
+      const infiniteScrollDiv = document.querySelector('.infinite-scroll-component');
+      if (!infiniteScrollDiv) return 0;
+      // Use data-testid selector (most reliable)
+      return infiniteScrollDiv.querySelectorAll('[data-testid="jp-card"]').length;
+    });
+    
+    console.log(`\n  ✅ PHASE 1 COMPLETE: ${finalJobCount} jobs loaded (${loadMoreAttempts} scroll iterations)\n`);
+    return finalJobCount;
+  }
+
+  /**
+   * PHASE 2: Extract all job data from infinite-scroll component
+   * Focus: Bulk extract from DOM using multiple strategies to catch all jobs
+   */
+  private async extractAllJobsFromDOM(page: Page, baseUrl: string): Promise<Array<{ url: string; title: string; company: string; vacancyCount: number | null }>> {
+    console.log('📊 PHASE 2: EXTRACTING - Bulk extracting all job data from DOM...');
+    
+    // First, get debug info about what's in the DOM
+    const debugInfo = await page.evaluate(() => {
+      const infiniteScrollDiv = document.querySelector('.infinite-scroll-component');
+      if (!infiniteScrollDiv) return { status: 'NO_CONTAINER' };
+      
+      // Check multiple selectors
+      const articleCardWrappers = infiniteScrollDiv.querySelectorAll('[data-testid="jp-card"]').length;
+      const allArticles = infiniteScrollDiv.querySelectorAll('article').length;
+      const allLinks = infiniteScrollDiv.querySelectorAll('a[href*="/stellen/"]').length;
+      const allDivsWithCardWrapper = infiniteScrollDiv.querySelectorAll('[class*="cardWrapper"]').length; // Could be div not article
+      
+      return {
+        status: 'OK',
+        articleCardWrappers,
+        allArticles,
+        allLinks,
+        allDivsWithCardWrapper,
+      };
+    });
+    
+    console.log(`  🔍 DEBUG INFO: article[data-testid="jp-card"]=${debugInfo.articleCardWrappers}, all articles=${debugInfo.allArticles}, all links=${debugInfo.allLinks}, divs with cardWrapper=${debugInfo.allDivsWithCardWrapper}`);
+    
+    const jobs = await page.evaluate((base: string) => {
+      const jobData: Array<{ url: string; title: string; company: string; vacancyCount: number | null }> = [];
+      const seenUrls = new Set<string>();
+      
+      // Find the infinite-scroll-component container
+      const infiniteScrollDiv = document.querySelector('.infinite-scroll-component');
+      if (!infiniteScrollDiv) {
+        console.warn('⚠️  infinite-scroll-component not found');
+        return jobData;
+      }
+      
+      let articles = infiniteScrollDiv.querySelectorAll('[data-testid="jp-card"]');
+      console.log(`  Found ${articles.length} articles with data-testid="jp-card"`);
+      articles.forEach((article) => {
+        const jobLink = article.querySelector('a[href*="/stellen/"]') as HTMLAnchorElement | null;
+        const href = jobLink?.getAttribute('href');
+        
+        // Build full URL
+        let url = href;
+        if (!url?.startsWith('http')) {
+          url = base + (href?.startsWith('/') ? href : '/' + href);
+        }
+        
+        seenUrls.add(url);
+        
+        // Extract title using data-testid (most reliable)
+        let title = '';
+        const titleEl = article.querySelector('[data-testid="jp-title"]');
+        if (titleEl) {
+          title = titleEl.textContent?.trim() || '';
+        }
+        
+        // Extract company using data-testid (h4[data-testid="jp-customer"])
+        let company = '';
+        const companyEl = article.querySelector('[data-testid="jp-customer"]');
+        if (companyEl) {
+          company = companyEl.textContent?.trim() || '';
+          // Remove "bei " prefix if present
+          if (company.startsWith('bei ')) {
+            company = company.substring(4);
+          }
+        }
+        
+        // Extract vacancy count from data-testid element
+        let vacancyCount: number | null = null;
+        const vacancyEl = article.querySelector('[data-testid="jp-vacancies"]');
+        if (vacancyEl) {
+          const text = vacancyEl.textContent || '';
+          const match = text.match(/(\d+)/);
+          if (match && match[1]) {
+            vacancyCount = parseInt(match[1], 10);
+          }
+        }
+        
+        // Fallback: Try generic selectors if data-testid didn't work
+        if (!title) {
+          const titleFallback = article.querySelector('h2, h3');
+          if (titleFallback) {
+            title = titleFallback.textContent?.trim() || '';
+          }
+        }
+        
+        if (!company) {
+          const companyFallback = article.querySelector('h4, [class*="company"]');
+          if (companyFallback) {
+            company = companyFallback.textContent?.trim() || '';
+            // Remove "bei " prefix if present
+            if (company.startsWith('bei ')) {
+              company = company.substring(4);
+            }
+          }
+        }
+        
+        jobData.push({
+          url,
+          title: title || 'Unknown Position',
+          company: company || 'Unknown Company',
+          vacancyCount: vacancyCount || 1,
+        });
+      });
+      
+      return jobData;
+    }, baseUrl);
+    
+    console.log(`  ✅ PHASE 2 COMPLETE: Extracted ${jobs.length} jobs\n`);
+    return jobs;
+  }
+
+  /**
    * Get all jobs from listing page with basic info (link, title, company, vacancies)
-   * Returns array of job objects for efficient checking
+   * ARCHITECTURE: Two-phase approach
+   * PHASE 1: Load all jobs by scrolling to bottom (focus on completeness)
+   * PHASE 2: Extract all job data in one bulk operation from infinite-scroll-component
    */
   async getAllJobsFromListing(): Promise<Array<{ url: string; title: string; company: string; vacancyCount: number | null }>> {
     let page: Page | null = null;
@@ -533,23 +771,21 @@ export class JobScraper {
       await this.setupPage(page);
       
       const baseUrl = 'https://www.ausbildung.de';
-      // Use the correct URL with apprenticeshipType filter for Ausbildung (apprenticeships)
-      const listingUrl = `${baseUrl}/suche/?search=Anwendungsentwicklung%7C&apprenticeshipType=Ausbildung`;
+      const listingUrl = `${baseUrl}/suche/?search=Fachinformatiker%2Fin%7C&apprenticeshipType=Ausbildung`;
       
-      console.log('\n🌐 Scraping ALL jobs from listing page...');
+      console.log('\n🌐 Scraping ALL jobs from listing page (TWO-PHASE ARCHITECTURE)...');
       await page.goto(listingUrl, {
         waitUntil: 'networkidle2',
         timeout: 60000,
       });
       
-      // Handle cookie consent modal that appears on ausbildung.de
+      // Handle cookie consent modal
       await this.handleCookieConsent(page);
       
-      // Extra wait to ensure page and modal are completely gone
-      console.log('⏳ Extra wait (10 seconds) to ensure modal is gone and page is fully loaded...');
+      console.log('⏳ Waiting 10 seconds for page to stabilize...');
       await new Promise(resolve => setTimeout(resolve, 10000));
       
-      // Verify modal is really gone
+      // Verify modal is gone
       const modalGone = await page.evaluate(() => {
         const modal = document.getElementById('CybotCookiebotDialog');
         if (!modal) return true;
@@ -558,7 +794,7 @@ export class JobScraper {
       });
       
       if (!modalGone) {
-        console.log('⚠️  Modal still detected, trying one more time...');
+        console.log('⚠️  Modal still visible, hiding...');
         await page.evaluate(() => {
           const modal = document.getElementById('CybotCookiebotDialog');
           if (modal) {
@@ -566,223 +802,17 @@ export class JobScraper {
           }
         });
         await new Promise(resolve => setTimeout(resolve, 2000));
-      } else {
-        console.log('✓ Modal confirmed gone, proceeding with scraping');
       }
       
-      // Load ALL jobs by clicking "Load more" button
-      // Strategy: Scroll -> Wait 10-15s -> Scroll until button appears -> Click -> Repeat
-      let previousJobCount = 0;
-      let loadMoreAttempts = 0;
-      const maxAttempts = 1000; // High limit to handle 3000-10000 jobs
-      let consecutiveFailures = 0;
-      const maxConsecutiveFailures = 10; // Increased from 5 to 10 - be more persistent
+      // ============ PHASE 1: LOAD ALL DATA ============
+      const totalLoaded = await this.loadAllJobsUntilEnd(page);
       
-      console.log('📜 Loading all jobs (clicking "Mehr Ergebnisse laden" button)...');
-      console.log('   Strategy: Scroll -> Wait 10-15s -> Find button -> Click -> Repeat');
+      // ============ PHASE 2: EXTRACT ALL DATA ============
+      const jobs = await this.extractAllJobsFromDOM(page, baseUrl);
       
-      while (loadMoreAttempts < maxAttempts && consecutiveFailures < maxConsecutiveFailures) {
-        // Count current jobs
-        const currentJobCount = await page.evaluate(() => {
-          return document.querySelectorAll('a[href*="/stellen/"]').length;
-        });
-        
-        if (currentJobCount > previousJobCount) {
-          console.log(`  ✓ Loaded ${currentJobCount} jobs...`);
-          previousJobCount = currentJobCount;
-          consecutiveFailures = 0; // Reset failure counter on successful load
-        }
-        
-        // STEP 1: Scroll to bottom multiple times
-        console.log(`  📜 Scrolling to trigger lazy loading...`);
-        for (let i = 0; i < 3; i++) {
-          await page.evaluate(() => {
-            window.scrollTo(0, document.body.scrollHeight);
-          });
-          await randomDelay(1000, 2000);
-        }
-        
-        // STEP 2: Wait 10-15 seconds for content to load
-        console.log(`  ⏳ Waiting 15-20 seconds for content to load...`);
-        await randomDelay(15000, 20000);
-        
-        // STEP 3: Scroll again to ensure button is visible
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight);
-        });
-        await randomDelay(1000, 2000);
-        
-        // STEP 4: Try to find and click the "Mehr Ergebnisse laden" button
-        const buttonClicked = await page.evaluate(() => {
-          // Search for button/link with "Mehr Ergebnisse laden" text
-          const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-          
-          for (const el of candidates) {
-            const text = (el.textContent || '').trim();
-            
-            // Check for exact or partial match with key words
-            if (text.includes('Mehr Ergebnisse laden') || 
-                text.includes('Mehr Ergebnisse') ||
-                (text.includes('Ergebnisse') && text.includes('laden'))) {
-              
-              // Verify visibility
-              const rect = el.getBoundingClientRect();
-              const style = window.getComputedStyle(el);
-              
-              if (rect.height > 0 && rect.width > 0 && 
-                  style.display !== 'none' && 
-                  style.visibility !== 'hidden') {
-                
-                // Try to click
-                try {
-                  if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement) {
-                    el.click();
-                  } else {
-                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                  }
-                  return true;
-                } catch (e) {
-                  // Continue if this element fails
-                }
-              }
-            }
-          }
-          
-          return false;
-        });
-        
-        if (buttonClicked) {
-          console.log(`  🔘 Clicked "Mehr Ergebnisse laden" button (attempt ${loadMoreAttempts + 1})`);
-          loadMoreAttempts++;
-          
-          // STEP 5: Scroll after button click to trigger loading
-          console.log(`  📜 Scrolling after button click...`);
-          for (let i = 0; i < 2; i++) {
-            await page.evaluate(() => {
-              window.scrollTo(0, document.body.scrollHeight);
-            });
-            await randomDelay(1000, 2000);
-          }
-          
-          // Wait for new content to load
-          await randomDelay(3000, 5000);
-        } else {
-          consecutiveFailures++;
-          console.log(`  ⚠️  "Load more" button not found (attempt ${consecutiveFailures}/${maxConsecutiveFailures})`);
-          
-          if (consecutiveFailures >= maxConsecutiveFailures) {
-            console.log(`  ✓ No more "Load more" button found after ${maxConsecutiveFailures} attempts. All jobs loaded (${currentJobCount} total)`);
-            break;
-          }
-          
-          // Wait a bit before trying again
-          await randomDelay(2000, 3000);
-        }
-      }
+      console.log(`✅ SUCCESS: ${jobs.length} jobs scraped from ${totalLoaded} items loaded\n`);
       
-      if (loadMoreAttempts >= maxAttempts) {
-        console.log(`  ⚠️  Reached maximum attempts (${maxAttempts}). Stopped loading.`);
-      }
-      
-      // Final job count
-      const finalJobCount = await page.evaluate(() => {
-        return document.querySelectorAll('a[href*="/stellen/"]').length;
-      });
-      console.log(`\n  📊 Final count: ${finalJobCount} job listings found`);
-      
-      
-      // Extract all job data
-      console.log('📊 Extracting job details...');
-      const jobs = await page.evaluate((base: string) => {
-        const jobData: Array<{ url: string; title: string; company: string; vacancyCount: number | null }> = [];
-        const seenUrls = new Set<string>();
-        
-        // Find all job cards
-        const jobCards = document.querySelectorAll('a[href*="/stellen/"]');
-        
-        jobCards.forEach((card) => {
-          const href = (card as HTMLAnchorElement).getAttribute('href');
-          if (!href || !href.includes('/stellen/')) return;
-          
-          // Build full URL
-          let url = href;
-          if (!url.startsWith('http')) {
-            url = base + (href.startsWith('/') ? href : '/' + href);
-          }
-          
-          // Skip duplicates
-          if (seenUrls.has(url)) return;
-          seenUrls.add(url);
-          
-          // Find the job card container by traversing up
-          let container: Element | null = card;
-          let traverseDepth = 0;
-          let title = '';
-          let company = '';
-          let vacancyCount: number | null = null;
-          
-          // Look for parent container with job info
-          while (container && traverseDepth < 10) {
-            // Try to find title
-            if (!title) {
-              const titleEl = container.querySelector('h2, h3, [class*="title"]');
-              if (titleEl) title = titleEl.textContent?.trim() || '';
-            }
-            
-            // Try to find company
-            if (!company) {
-              const companyEl = container.querySelector('[class*="company"], [class*="corporation"]');
-              if (companyEl) company = companyEl.textContent?.trim() || '';
-            }
-            
-            // Try to find vacancy count
-            if (vacancyCount === null) {
-              const vacancyEl = container.querySelector('[data-testid="jp-vacancies"]');
-              if (vacancyEl) {
-                const text = vacancyEl.textContent || '';
-                const match = text.match(/(\d+)/);
-                if (match && match[1]) {
-                  vacancyCount = parseInt(match[1], 10);
-                }
-              }
-            }
-            
-            // Stop if we found everything or went too far
-            if (title && company) break;
-            if (container.tagName === 'BODY' || container.tagName === 'MAIN') break;
-            
-            container = container.parentElement;
-            traverseDepth++;
-          }
-          
-          // Extract from card text if not found
-          if (!title || !company) {
-            const cardText = (card as HTMLElement).textContent || '';
-            if (!title) {
-              // Try to extract first meaningful line as title
-              const lines = cardText.split('\n').map(l => l.trim()).filter(l => l.length > 10);
-              if (lines.length > 0 && lines[0]) title = lines[0];
-            }
-            if (!company && cardText.includes('bei ')) {
-              const match = cardText.match(/bei\s+([^\n]+)/i);
-              if (match && match[1]) company = match[1].trim();
-            }
-          }
-          
-          jobData.push({
-            url,
-            title: title || 'Unknown Position',
-            company: company || 'Unknown Company',
-            vacancyCount: vacancyCount || 1, // Default to 1 if not found
-          });
-        });
-        
-        return jobData;
-      }, baseUrl);
-      
-      console.log(`✅ Scraped ${jobs.length} jobs from listing page\n`);
-      
-      // Close page gracefully with timeout to avoid hanging
+      // Close page gracefully
       try {
         const closePromise = page.close();
         await Promise.race([
@@ -790,8 +820,7 @@ export class JobScraper {
           new Promise((_, reject) => setTimeout(() => reject(new Error('Page close timeout')), 5000))
         ]);
       } catch (closeError) {
-        console.log('⚠️  Page close had issues but jobs were captured, continuing...');
-        // Don't throw - page was already scraped successfully
+        console.log('⚠️  Page close timeout, continuing...');
       }
       
       return jobs;
@@ -817,7 +846,7 @@ export class JobScraper {
       console.log('Scraping ausbildung.de from page HTML...');
       
       const jobUrls = new Set<string>();
-      const searchQuery = 'Anwendungsentwicklung|';
+      const searchQuery = 'Fachinformatiker/in|';
       const apprenticeshipType = 'Ausbildung';
       
       const searchUrl = `${baseUrl}/suche/?search=${encodeURIComponent(searchQuery)}&apprenticeshipType=${apprenticeshipType}`;
@@ -1002,8 +1031,8 @@ export class JobScraper {
       const uuidMatch = fullSlug.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i);
       const uuid = uuidMatch ? uuidMatch[1] : null;
       
-      // Go to the listing page for Anwendungsentwicklung
-      const listingUrl = 'https://www.ausbildung.de/suche/?search=Fachinformatiker%2Fin+für+Anwendungsentwicklung%7C';
+      // Go to the listing page for Fachinformatiker/in apprenticeship (ensure we are on the correct listing page)
+      const listingUrl = 'https://www.ausbildung.de/suche/?search=Fachinformatiker%2Fin%7C&apprenticeshipType=Ausbildung';
       console.log(`🔍 Checking listing page for job (UUID: ${uuid || 'none'})...`);
       
       await page.goto(listingUrl, {

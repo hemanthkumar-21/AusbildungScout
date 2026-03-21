@@ -107,7 +107,7 @@ export function extractSalaryFromText(text: string): number | null {
   const matches1 = cleanText.matchAll(pattern1);
   
   for (const match of matches1) {
-    const salary = parseInt(match[1] + match[2]);
+    const salary = parseInt(match[1]||'0') + parseInt(match[2]||'0');
     // Reasonable range for Ausbildung: 500-2000 EUR/month
     if (salary >= 500 && salary <= 2000) {
       return salary;
@@ -130,7 +130,7 @@ export function extractSalaryFromText(text: string): number | null {
       const numbers = context.matchAll(numberPattern);
       
       for (const numMatch of numbers) {
-        const num = parseInt(numMatch[1]);
+        const num = parseInt(numMatch[1]||'0');
         if (num >= 500 && num <= 2000) {
           return num;
         }

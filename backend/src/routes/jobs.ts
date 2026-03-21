@@ -9,7 +9,6 @@ import {
   getJobById,
   searchJobs,
   getStats,
-  createJob,
 } from './jobs.controller';
 
 const router = Router();
@@ -19,8 +18,5 @@ router.get('/stats', getStats);
 router.get('/search', searchJobs);
 router.get('/:id', getJobById);
 router.get('/', getJobs);
-
-// POST endpoints (for admin/testing)
-router.post('/', createJob);
 
 export default router;

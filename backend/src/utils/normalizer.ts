@@ -204,7 +204,7 @@ export function normalizeDate(dateStr: string): Date | null {
     const ddmmyyyy = cleaned.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
     if (ddmmyyyy) {
       const [, day, month, year] = ddmmyyyy;
-      return new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+      return new Date(`${year}-${month?.padStart(2, '0')}-${day?.padStart(2, '0')}`);
     }
     
     // Format: "1. September 26" or "Sep '26"
@@ -227,14 +227,13 @@ export function normalizeDate(dateStr: string): Date | null {
     const dayMonthYear = cleaned.match(/(\d{1,2})\.\s*(\w+)\s*(\d{2,4})/);
     if (dayMonthYear) {
       const [, day, month, year] = dayMonthYear;
-      const monthNum = monthNames[month];
+      const monthNum = monthNames[month||''];
       if (monthNum) {
-        const fullYear = parseInt(year) < 100 ? 2000 + parseInt(year) : parseInt(year);
-        return new Date(`${fullYear}-${String(monthNum).padStart(2, '0')}-${day.padStart(2, '0')}`);
+        const fullYear = parseInt(year||'0') < 100 ? 2000 + parseInt(year||'0') : parseInt(year||'0');
+        return new Date(`${fullYear}-${String(monthNum).padStart(2, '0')}-${day?.padStart(2, '0')}`);
       }
     }
     
-    // Fallback: Try native parsing
     const date = new Date(cleaned);
     if (!isNaN(date.getTime())) {
       return date;

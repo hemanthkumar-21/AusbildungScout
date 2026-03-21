@@ -112,6 +112,7 @@ async function findCompanyCareerPage(
       // Try each path
       for (const path of careerPaths) {
         const careerUrl = `${url.protocol}//${domain}${path}`;
+        console.log(`company url: ${careerUrl}`)
         const exists = await checkUrlExists(careerUrl);
         if (exists) {
           return careerUrl;
@@ -321,42 +322,4 @@ function extractFirstYearSalaryFromHTML($: cheerio.CheerioAPI, html: string): nu
   }
   
   return null;
-}
-
-/**
- * Update job benefits from company website
- * This function can be called periodically to refresh benefits data
- */
-export async function updateJobBenefitsFromCompany(
-  job: any
-): Promise<Partial<any> | null> {
-  const companyData = await fetchCompanyBenefits(
-    job.company_name,
-    job.original_link
-  );
-  
-  if (!companyData) {
-    return null;
-  }
-  
-  // Merge with existing benefits
-  const existingBenefits = job.benefits || [];
-  const newBenefits = [...new Set([...existingBenefits, ...companyData.benefits])];
-  
-  const existingTags = job.benefits_tags || [];
-  const newTags = [...new Set([...existingTags, ...companyData.benefitTags])];
-  
-  return {
-    benefits: newBenefits,
-    benefits_tags: newTags,
-    benefits_verified: true,
-    benefits_last_updated: companyData.lastUpdated,
-    ...(companyData.tariffType && !job.tariff_type && { tariff_type: companyData.tariffType }),
-    ...(companyData.relocationSupport && { 
-      relocation_support: {
-        ...(job.relocation_support || {}),
-        ...companyData.relocationSupport
-      }
-    })
-  };
 }

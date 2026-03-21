@@ -648,7 +648,7 @@ ${html}
       console.log('\n🔄 Mining from ausbildung.de API directly...');
       
       const baseUrl = 'https://www.ausbildung.de';
-      const searchQuery = 'Anwendungsentwicklung|';
+      const searchQuery = 'Fachinformatiker/in|';
       let from = 0;
       const pageSize = 20;
       let totalProcessed = 0;
@@ -928,7 +928,7 @@ async function main() {
   
   const config: MinerConfig = {
     urls: [
-      'https://www.ausbildung.de/suche/?search=Anwendungsentwicklung%7C&apprenticeshipType=Ausbildung',
+      'https://www.ausbildung.de/suche/?search=Fachinformatiker%2Fin%7C&apprenticeshipType=Ausbildung'
     ],
     maxJobsPerRun,
     dryRun,

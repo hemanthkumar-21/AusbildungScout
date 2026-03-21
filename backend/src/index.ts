@@ -83,7 +83,6 @@ Available Routes:
   GET  /api/jobs/search?q=<term>  - Full-text search
   GET  /api/jobs/:id              - Get single job
   GET  /api/jobs/stats            - Market statistics
-  POST /api/jobs                  - Add job (admin)
   GET  /health                    - Health check
 
 ═══════════════════════════════════════

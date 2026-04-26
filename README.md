@@ -530,7 +530,7 @@ Contributions are welcome! Please follow these guidelines:
 
 ## 📝 License
 
-This project is licensed under the ISC License - see LICENSE file for details.
+This project is licensed under the MIT License - see [LICENSE.md](./LICENSE.md) for details.
 
 ## 🙏 Acknowledgments
 

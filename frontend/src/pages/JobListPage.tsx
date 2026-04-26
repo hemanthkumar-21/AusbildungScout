@@ -11,7 +11,6 @@ export default function JobListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [jobs, setJobs] = useState<IJob[]>([]);
   const [filters, setFilters] = useState<JobFilterQuery>(() => {
-    // Initialize filters from URL query parameters
     return {
       page: parseInt(searchParams.get("page") || "1", 10),
       limit: parseInt(searchParams.get("limit") || "20", 10),
@@ -75,9 +74,6 @@ export default function JobListPage() {
   });
   const [loading, setLoading] = useState(false);
 
-  /**
-   * Sync filters to URL query parameters
-   */
   const syncFiltersToURL = (updatedFilters: JobFilterQuery) => {
     const params = new URLSearchParams();
 

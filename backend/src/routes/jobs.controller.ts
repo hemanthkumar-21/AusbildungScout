@@ -1,16 +1,7 @@
-/**
- * Job API Controllers
- * Handles all job-related API requests
- */
-
 import { Request, Response } from 'express';
 import Job from '@/model/job';
 import { buildMongoDBFilter, getPaginationParams, buildSortOptions, JobFilterQuery } from '@/utils/filters';
 
-/**
- * GET /api/jobs
- * Fetch jobs with filtering, searching, and pagination
- */
 export async function getJobs(req: Request, res: Response) {
   try {
     // Extract query parameters - build object dynamically to avoid undefined values
@@ -91,10 +82,6 @@ export async function getJobs(req: Request, res: Response) {
   }
 }
 
-/**
- * GET /api/jobs/:id
- * Fetch a single job by ID
- */
 export async function getJobById(req: Request, res: Response) {
   try {
     const { id } = req.params;
@@ -121,10 +108,6 @@ export async function getJobById(req: Request, res: Response) {
   }
 }
 
-/**
- * GET /api/jobs/search
- * Full-text search endpoint
- */
 export async function searchJobs(req: Request, res: Response) {
   try {
     const searchTerm = req.query.q as string;
@@ -159,10 +142,6 @@ export async function searchJobs(req: Request, res: Response) {
   }
 }
 
-/**
- * GET /api/stats
- * Return job market statistics
- */
 export async function getStats(req: Request, res: Response) {
   try {
     const totalJobs = await Job.countDocuments();

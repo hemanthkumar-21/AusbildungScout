@@ -13,7 +13,6 @@ import {
 
 const router = Router();
 
-// GET endpoints
 router.get('/stats', getStats);
 router.get('/search', searchJobs);
 router.get('/:id', getJobById);

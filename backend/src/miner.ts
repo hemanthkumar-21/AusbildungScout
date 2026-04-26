@@ -24,6 +24,22 @@ interface MinerConfig {
   batchSizeExplicitlySet?: boolean; // Track if batch size was explicitly set via CLI
 }
 
+interface SkippedJob {
+  url: string;
+  title: string;
+  company: string;
+  reason: string;
+  currentVacancy: number;
+  newVacancy: number;
+  dbJobId: string;
+  dbJobTitle: string;
+  dbCompanyName: string;
+  skippedAt: string;
+  lastCheckedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 class JobMiner {
   private scraper: JobScraper;
   private config: MinerConfig;
@@ -31,6 +47,8 @@ class JobMiner {
   private geminiApiKeys: string[] = [];
   private currentKeyIndex: number = 0;
   private keyStats: Map<number, { lastCallTime: number; callCount: number; resetTime: number }> = new Map();
+  private skippedJobsLog: SkippedJob[] = [];
+  private skippedJobsFile: string;
   
   constructor(config: MinerConfig) {
     this.config = config;
@@ -58,8 +76,76 @@ class JobMiner {
     if (!fs.existsSync(this.rawDataDir)) {
       fs.mkdirSync(this.rawDataDir, { recursive: true });
     }
+    
+    // Setup skipped jobs log file
+    const logsDir = path.join(process.cwd(), 'miner_logs');
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    this.skippedJobsFile = path.join(logsDir, `skipped_jobs_${timestamp}.json`);
   }
   
+  /**
+   * Log a skipped job for analysis
+   */
+  private logSkippedJob(
+    listedJob: any,
+    existingJob: any,
+    reason: string,
+    currentVacancy: number,
+    newVacancy: number
+  ): void {
+    const skippedJob: SkippedJob = {
+      url: listedJob.url,
+      title: listedJob.title,
+      company: listedJob.company,
+      reason,
+      currentVacancy,
+      newVacancy,
+      dbJobId: existingJob._id.toString(),
+      dbJobTitle: existingJob.job_title,
+      dbCompanyName: existingJob.company_name,
+      skippedAt: new Date().toISOString(),
+      lastCheckedAt: existingJob.last_checked_at?.toISOString(),
+      createdAt: existingJob.createdAt?.toISOString(),
+      updatedAt: existingJob.updatedAt?.toISOString(),
+    };
+    
+    this.skippedJobsLog.push(skippedJob);
+    console.log(`📝 Logged skipped job: ${listedJob.title} (${reason})`);
+  }
+
+  /**
+   * Save skipped jobs log to file
+   */
+  private saveSkippedJobsLog(): void {
+    try {
+      if (this.skippedJobsLog.length === 0) {
+        console.log('ℹ️  No skipped jobs to log');
+        return;
+      }
+      
+      const logData = {
+        generatedAt: new Date().toISOString(),
+        totalSkipped: this.skippedJobsLog.length,
+        jobs: this.skippedJobsLog,
+      };
+      
+      fs.writeFileSync(
+        this.skippedJobsFile,
+        JSON.stringify(logData, null, 2),
+        'utf-8'
+      );
+      
+      console.log(`\n💾 Skipped jobs log saved: ${this.skippedJobsFile}`);
+      console.log(`   📊 Total skipped: ${this.skippedJobsLog.length}`);
+      
+    } catch (error) {
+      console.error(`⚠️  Failed to save skipped jobs log: ${error}`);
+    }
+  }
+
   /**
    * Save raw HTML content to file
    */
@@ -335,6 +421,7 @@ ${html}
           const existingJob = await Job.findOne({ original_link: listedJob.url });
           
           if (existingJob) {
+
             // Job exists - just update vacancy count if changed
             const currentVacancy = existingJob.vacancy_count || 1;
             const newVacancy = listedJob.vacancyCount || 1;
@@ -350,6 +437,15 @@ ${html}
               }
               updated++;
             } else {
+              // Job exists with same vacancy count - skip but log for analysis
+              this.logSkippedJob(
+                listedJob, 
+                existingJob, 
+                'Same vacancy count - No changes detected',
+                currentVacancy,
+                newVacancy
+              );
+              
               // Just update timestamp to mark as checked
               if (!this.config.dryRun) {
                 await Job.findByIdAndUpdate(existingJob._id, {
@@ -431,6 +527,9 @@ ${html}
       console.log(`   ➕ New jobs added: ${added}`);
       console.log(`   ✏️  Jobs updated: ${updated}`);
       console.log(`   ⏭️  Jobs unchanged: ${skipped}`);
+      
+      // Save detailed skipped jobs log
+      this.saveSkippedJobsLog();
       
     } catch (error) {
       console.error('❌ Mining failed:', error);

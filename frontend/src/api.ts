@@ -11,7 +11,6 @@ const api = axios.create({
 });
 
 export const jobsApi = {
-  // Get all jobs with filters
   getJobs: async (filters: JobFilterQuery): Promise<JobsResponse> => {
     const params = new URLSearchParams();
     
@@ -23,8 +22,6 @@ export const jobsApi = {
     if (filters.search) params.append('search', filters.search);
     if (filters.page) params.append('page', String(filters.page));
     if (filters.limit) params.append('limit', String(filters.limit));
-    
-    // New filters
     if (filters.tariffTypes) params.append('tariffTypes', filters.tariffTypes);
     if (filters.relocationSupport) params.append('relocationSupport', String(filters.relocationSupport));
     if (filters.rentSubsidy) params.append('rentSubsidy', String(filters.rentSubsidy));
@@ -38,7 +35,6 @@ export const jobsApi = {
     return response.data;
   },
 
-  // Get single job by ID
   getJobById: async (id: string): Promise<JobResponse> => {
     const response = await api.get<JobResponse>(`/jobs/${id}`);
     return response.data;

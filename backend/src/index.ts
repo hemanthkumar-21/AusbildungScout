@@ -9,33 +9,21 @@ import dotenv from 'dotenv';
 import connectDB from '@/db';
 import jobRoutes from '@/routes/jobs';
 
-// Load environment variables
 dotenv.config();
 
 const app: Express = express();
 const PORT = process.env.PORT || 5000;
 
-// === MIDDLEWARE ===
-
-// CORS configuration
 const corsOptions = {
   origin: '*',
   credentials: true,
 };
 app.use(cors(corsOptions));
-
-// Body parser
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// === DATABASE CONNECTION ===
-
-// Connect to MongoDB
 connectDB();
 
-// === ROUTES ===
-
-// Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
@@ -44,18 +32,14 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// API routes
 app.use('/api/jobs', jobRoutes);
 
-// 404 handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({
     success: false,
     error: 'Route not found',
   });
 });
-
-// === ERROR HANDLING ===
 
 app.use((error: any, req: Request, res: Response) => {
   console.error('Unhandled error:', error);
@@ -64,8 +48,6 @@ app.use((error: any, req: Request, res: Response) => {
     error: error.message || 'Internal server error',
   });
 });
-
-// === START SERVER ===
 
 const server = app.listen(PORT, () => {
   console.log(`
@@ -89,7 +71,6 @@ Available Routes:
   `);
 });
 
-// === GRACEFUL SHUTDOWN ===
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully...');

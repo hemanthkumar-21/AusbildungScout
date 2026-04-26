@@ -4,3 +4,4 @@ dist
 .env
 raw_data
 page_debug
+miner_logs
